@@ -33,9 +33,12 @@ assert.match(dashboard, /on:click=\{\(\) => onOpenStream\(stream\)\}/, "Stopped 
 assert.match(live, /onLeaveHome/, "Live view must provide a reusable Home action");
 assert.match(media, /frameRate: \{ exact: profile\.fps \}/, "Camera FPS must be selected with an exact constraint");
 assert.match(media, /defaultWidth/, "Camera probe must retain the default native dimensions");
-assert.match(media, /device\?\.maxWidth/, "Camera probe must test dimensions reported by capabilities");
-assert.match(media, /nativeCameraConstraints/, "Camera probe must open a native capability request");
-assert.match(media, /applyConstraints\(exactCameraConstraints/, "Capture retry must re-apply the exact native profile");
+assert.match(media, /device\.maxWidth/, "Camera probe must test dimensions reported by capabilities");
+assert.match(media, /resizeMode: \{ exact: "crop-and-scale" \}/, "Camera output must request browser crop-and-scale");
+assert.match(media, /aspectRatio: \{ exact: profile\.width \/ profile\.height \}/, "Camera output must request the exact target aspect ratio");
+assert.match(media, /applyConstraints\(exactCameraConstraints/, "Capture retry must re-apply the exact output profile");
+assert.match(media, /return CAMERA_RESOLUTIONS\.map/, "Output choices must come from fixed target resolutions");
+assert.doesNotMatch(media, /resizeMode: \{ exact: "none" \}/, "Output capture must not accept an unscaled native 4:3 track");
 assert.doesNotMatch(media, /captureStream\(/, "The camera path must not create a canvas capture stream");
 assert.doesNotMatch(media, /document\.createElement\("canvas"\)/, "The camera path must not create a canvas");
 assert.match(media, /RTCRtpSender/, "Codec detection must use the browser WebRTC capability list");

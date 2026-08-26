@@ -6,7 +6,8 @@
 ┌─────────────────────────────┐
 │ Android/Desktop Chrome      │
 │ getUserMedia                 │
-│ exact camera track + Opus    │
+│ exact output track + crop    │
+│ and scale + Opus             │
 │ RTCPeerConnection / WHIP     │
 └──────────────┬──────────────┘
                │ HTTPS SDP : media.example.com
@@ -54,7 +55,7 @@ src/App.svelte
 
 src/lib/media.ts
   ├─ permission + device enumeration
-  ├─ exact camera profile probe
+  ├─ exact output profile probe
   ├─ WebRTC capability probe
   └─ getUserMedia capture
 
@@ -67,19 +68,23 @@ src/lib/mediamtx-webrtc-reader.js
 
 ### Capture semantics
 
-`getUserMedia` memakai `resizeMode: none`. Preset umum diuji dengan
-`width`/`height`/`frameRate` `exact`; detector juga membuka satu stream dengan
-ukuran/FPS maksimum/default sebagai native probe. Hanya ukuran/FPS aktual yang
-terlihat di `getSettings()` yang ditampilkan. Ukuran native non-preset, misalnya
-2304×1728, tetap dapat dipakai bila lolos uji. Jika kamera hanya
-mengembalikan orientasi sensor landscape, profile itu tidak ditolak hanya
-karena operator memilih layout portrait; output tetap mengikuti ukuran native
-kamera.
+Output `getUserMedia` memakai `width`, `height`, `aspectRatio`, dan `frameRate`
+`exact` dengan `resizeMode: crop-and-scale`. Detector hanya menguji target
+output 16:9/9:16 yang ditentukan aplikasi, lalu membuang hasil jika
+`getSettings()` tidak mengembalikan ukuran atau FPS yang diminta. Kemampuan
+sensor native seperti 2304×1728 hanya dipakai sebagai informasi dan filter;
+tidak pernah otomatis menjadi ukuran output job.
 
-Dimensi track kamera adalah dimensi final yang dikirim. Tidak ada scaling,
-canvas, padding, black bar, atau rotate pada output. CSS rotate di `LiveView`
-hanya memutar preview mobile agar track landscape dapat dilihat seperti aplikasi
-kamera; CSS tidak memengaruhi WebRTC track.
+Saat startup, migrasi SQLite mengubah profile job lama yang bukan 16:9/9:16 ke
+1920×1080 atau 1080×1920 berdasarkan `portrait_mode`. Path, token, dan recording
+metadata tidak berubah.
+
+Dengan demikian kamera 4:3 dapat diminta menjadi 1920×1080 tanpa canvas:
+browser/OS memotong area 4:3 dan menurunkannya ke track 16:9. Spesifikasi
+`crop-and-scale` tidak menjamin implementasi crop tertentu berjalan di ISP
+hardware; jaminan hardware-only membutuhkan native Android Camera2/MediaCodec.
+CSS rotate di `LiveView` hanya memutar preview mobile agar track landscape dapat
+dilihat seperti aplikasi kamera; CSS tidak memengaruhi WebRTC track.
 
 ### Codec
 

@@ -11,7 +11,7 @@ dan mengeluarkan SRT. Server tidak mentranscode video.
 
 ```text
 getUserMedia
-  -> MediaStream track native
+  -> MediaStream track output exact (crop-and-scale bila perlu)
   -> WebRTC / WHIP
   -> MediaMTX
   -> SRT read / OBS
@@ -44,8 +44,8 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 2. Operator menekan Deteksi dan memberi izin kamera serta mikrofon.
 3. Sistem menampilkan kamera yang ditemukan, kemampuan maksimum, zoom, dan
    torch bila dilaporkan browser.
-4. Sistem menguji kombinasi resolusi/FPS dengan constraint `exact` pada kamera
-   yang dipilih.
+4. Sistem menguji kombinasi resolusi/FPS output dengan constraint `exact` pada
+   kamera yang dipilih, termasuk aspect ratio target dan `crop-and-scale`.
 5. Hanya kombinasi yang benar-benar berhasil dibuka yang ditampilkan.
 6. Operator memilih codec WebRTC yang tersedia, audio Opus, max bitrate, dan
    optional recording.
@@ -55,9 +55,11 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 1. Halaman live menampilkan preview standby.
 2. Operator menekan `Start`.
-3. Browser membuka kamera/mikrofon lagi dengan profile exact yang tersimpan.
-4. `getSettings()` diverifikasi agar ukuran/FPS aktual cocok; tidak ada
-   fallback, resize, rotate, atau canvas.
+3. Browser membuka kamera/mikrofon lagi dengan profile output exact yang
+   tersimpan.
+4. `getSettings()` diverifikasi agar ukuran/FPS aktual cocok. Kamera 4:3 boleh
+   dipotong dan diperkecil oleh pipeline `crop-and-scale`; tidak ada canvas,
+   rotate, atau fallback ukuran diam-diam.
 5. Browser membuat peer connection dan mengirim SDP WHIP ke MediaMTX.
 6. Setelah WebRTC connected, MediaMTX path menjadi live.
 7. `Stop` menghentikan track dan sesi WHIP, tetapi job tetap tersedia di Home.
@@ -80,17 +82,23 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 ### Video
 
-- Resolusi dan FPS adalah mode capture kamera serta dimensi final encoded track.
-- Probe memulai dari 1920×1080, 1280×720, dan 854×480 pada FPS 24/30/60,
-  lalu menambahkan ukuran/FPS default dan maksimum yang dilaporkan kamera.
-- Preset diuji dengan constraint `exact`; detector juga membuka satu stream
-  native dengan `resizeMode: none` pada ukuran maksimum/default yang dilaporkan.
-  Hanya mode yang menghasilkan ukuran/FPS aktual yang jelas dari
-  `getSettings()` yang ditampilkan. Karena itu mode native seperti 2304×1728
-  juga dapat dipilih bila memang tersedia.
-- Portrait mencoba pasangan dimensi portrait, tetapi jika kamera hanya
-  menyediakan sensor native landscape, mode native tersebut tetap dipakai dan
-  ditampilkan. Tidak ada rotate atau canvas baru.
+- Resolusi dan FPS adalah dimensi final encoded track, bukan ukuran sensor.
+- Probe hanya menawarkan target 1920×1080, 1280×720, dan 854×480 pada FPS
+  24/30/60 (serta FPS maksimum/default yang dilaporkan), atau pasangan portrait
+  9:16 ketika orientasi portrait dipilih.
+- Setiap target diuji dengan `width`, `height`, `aspectRatio`, `frameRate`, dan
+  `resizeMode: crop-and-scale` yang `exact`. Hanya target yang benar-benar
+  menghasilkan ukuran/FPS tersebut pada `getSettings()` yang ditampilkan.
+- Kemampuan sensor native, misalnya 2304×1728, hanya ditampilkan sebagai
+  informasi kamera. Kamera 4:3 dapat dipotong ke 1920×1080 jika browser
+  menyetujui pipeline crop-and-scale; ukuran 4:3 tidak menjadi output job.
+- Definisi browser untuk `crop-and-scale` mengikuti [MediaTrackConstraints di
+  MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints).
+- `crop-and-scale` adalah kemampuan pipeline browser/OS dan tidak menjamin
+  crop berjalan di ISP hardware. Jaminan hardware-only membutuhkan aplikasi
+  native Android Camera2/MediaCodec.
+- Migrasi startup mengubah profile job lama yang bukan 16:9/9:16 menjadi
+  1920×1080 atau 1080×1920 sesuai `portraitMode`; path dan token tidak berubah.
 - Nilai bitrate di UI adalah batas maksimum encoder WebRTC.
 - WebRTC boleh mengirim bitrate aktual lebih rendah karena scene atau network;
   aplikasi tidak menjalankan adaptive controller buatan sendiri.
@@ -216,7 +224,8 @@ dan UDP 8890 untuk SRT tetap direct.
 
 - `go test ./...` lulus.
 - `npm run check`, `npm run build`, dan `npm run test:flow` lulus.
-- Browser hanya menampilkan kamera profile yang lolos exact preflight.
+- Browser hanya menampilkan target output yang lolos exact preflight dengan
+  ukuran/aspect ratio final yang benar.
 - Start gagal jelas bila kamera, audio, codec, atau WHIP tidak tersedia.
 - Create tidak meminta kamera live; Start yang membuka kamera.
 - Stop lalu buka ulang dari dashboard memakai URL SRT yang sama.

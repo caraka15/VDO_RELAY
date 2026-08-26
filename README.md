@@ -1,8 +1,8 @@
 # VDO Relay
 
 VDO Relay adalah relay kamera untuk Android Chrome dan desktop Chrome.
-Browser membuka kamera dan mikrofon, memilih mode kamera exact, lalu mengirim
-track native melalui WHIP/WebRTC ke MediaMTX. MediaMTX tidak melakukan
+Browser membuka kamera dan mikrofon, memilih output exact 16:9/9:16, lalu
+mengirim track melalui WHIP/WebRTC ke MediaMTX. MediaMTX tidak melakukan
 transcoding; hasilnya dibaca OBS melalui SRT.
 
 ```text
@@ -100,11 +100,11 @@ tidak merender ulang file tersebut.
 ## Alur penggunaan
 
 1. Login dengan `admin/admin` pada instalasi baru, lalu ganti password.
-2. Pilih orientasi yang ingin diminta ke kamera.
+2. Pilih orientasi output yang ingin dibuat.
 3. Tekan Deteksi. Browser meminta izin kamera dan mikrofon.
-4. Pilih kamera. Resolusi/FPS hanya menampilkan mode native yang terbaca dari
-   `getSettings()` atau kombinasi yang berhasil diuji dengan constraint `exact`,
-   termasuk mode native yang dilaporkan kamera.
+4. Pilih kamera. Resolusi/FPS hanya menampilkan target output 16:9/9:16 yang
+   berhasil diuji dengan constraint `exact` dan `getSettings()`. Ukuran native
+   kamera hanya ditampilkan sebagai kemampuan sensor, bukan pilihan output.
 5. Pilih codec WebRTC yang tersedia, audio Opus, bitrate maksimum, dan record.
 6. Tekan `Create stream`. Ini hanya membuat job dan URL; kamera belum live.
 7. Di halaman job, tekan `Start`. Kamera dibuka ulang, diuji lagi, lalu WHIP
@@ -118,12 +118,24 @@ OBS melalui SRT dan player browser melalui WHEP.
 
 ## Kamera, codec, dan orientasi
 
-Resolusi/FPS yang dipilih adalah mode capture kamera dan juga ukuran final track
-yang dikirim. Detector juga menguji ukuran/FPS default dan maksimum yang
-dilaporkan kamera, bukan hanya preset 16:9. Jika kamera hanya membuka sensor
-native landscape, mode itu tetap dipakai walaupun layout awal portrait. Tidak
-ada upscale, canvas, rotate, atau black bar yang masuk ke file. Black bar
-desktop hanya bagian kotak preview.
+Resolusi/FPS yang dipilih adalah ukuran dan FPS final track yang dikirim.
+Detector menguji preset output 1920×1080, 1280×720, dan 854×480 (atau pasangan
+portrait-nya) dengan `width`, `height`, `aspectRatio`, `frameRate`, dan
+`resizeMode: crop-and-scale` yang exact. Jadi sensor 2304×1728 (4:3), misalnya,
+tetap dapat menghasilkan output 1920×1080 (16:9) jika Chrome menyetujuinya;
+ukuran 2304×1728 tidak dimasukkan sebagai output final.
+
+Semantik `resizeMode` mengikuti [MediaTrackConstraints di MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints).
+
+`crop-and-scale` dilakukan oleh pipeline media browser/OS, bukan canvas, dan
+tidak menjamin bahwa setiap perangkat memakai ISP hardware untuk proses crop.
+Tidak ada rotate atau transcoding server. Jika jaminan hardware ISP/encoder
+wajib, diperlukan aplikasi native Android Camera2/MediaCodec. Black bar desktop
+hanya bagian kotak preview.
+
+Saat aplikasi menemukan job lama yang menyimpan ukuran 4:3, migrasi database
+mengubahnya ke 1920×1080 atau 1080×1920 sesuai orientasi job. Link stream tetap
+sama.
 
 Pada mobile, preview mengikuti bentuk aplikasi kamera: stage tetap memenuhi
 layar dan track landscape diputar dengan CSS hanya untuk tampilan. Transform
@@ -197,7 +209,7 @@ halaman HTTP biasa selain pengecualian localhost tertentu.
 cmd/vdo/                         entrypoint Go
 internal/app/                    API, SQLite, auth, lifecycle MediaMTX
 frontend/src/App.svelte          routing dashboard/setup/live/result/player
-frontend/src/lib/media.ts        capability dan exact camera capture
+frontend/src/lib/media.ts        capability dan exact output capture
 frontend/src/lib/mediamtx-webrtc-publisher.js  WHIP publisher
 frontend/src/lib/mediamtx-webrtc-reader.js     WHEP player
 deploy/nginx/vdo-relay.conf      vhost port 80 sebelum Certbot

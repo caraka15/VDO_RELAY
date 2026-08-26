@@ -225,6 +225,9 @@ func (input createStreamRequest) validate() error {
 	if input.Width < 160 || input.Height < 160 || input.Width > 7680 || input.Height > 7680 || input.Width%2 != 0 || input.Height%2 != 0 {
 		return errors.New("resolution must be even and between 160 and 7680 pixels")
 	}
+	if input.Width*9 != input.Height*16 && input.Width*16 != input.Height*9 {
+		return errors.New("resolution must use a 16:9 or 9:16 output aspect ratio")
+	}
 	if input.FPS < 1 || input.FPS > 120 {
 		return errors.New("fps must be between 1 and 120")
 	}

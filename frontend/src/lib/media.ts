@@ -160,34 +160,22 @@ function exactCameraConstraints(profile: CameraProfile, deviceId?: string): Medi
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     width: { exact: profile.width },
     height: { exact: profile.height },
+    aspectRatio: { exact: profile.width / profile.height },
     frameRate: { exact: profile.fps },
-    resizeMode: { exact: "none" },
+    resizeMode: { exact: "crop-and-scale" },
   } as MediaTrackConstraints;
 }
 
-function nativeCameraConstraints(deviceId?: string, preferred?: Partial<CameraProfile>): MediaTrackConstraints {
+function cropCameraConstraints(deviceId?: string, preferred?: Partial<CameraProfile>): MediaTrackConstraints {
   const constraints: Record<string, unknown> = {
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-    resizeMode: { exact: "none" },
+    resizeMode: { exact: "crop-and-scale" },
   };
   if (preferred?.width) constraints.width = { ideal: preferred.width };
   if (preferred?.height) constraints.height = { ideal: preferred.height };
+  if (preferred?.width && preferred?.height) constraints.aspectRatio = { ideal: preferred.width / preferred.height };
   if (preferred?.fps) constraints.frameRate = { ideal: preferred.fps };
   return constraints as MediaTrackConstraints;
-}
-
-function profileFromSettings(track: MediaStreamTrack): CameraProfile | null {
-  const settings = track.getSettings();
-  const width = finiteNumber(settings.width);
-  const height = finiteNumber(settings.height);
-  const fps = finiteNumber(settings.frameRate);
-  if (!width || !height || !fps) return null;
-  return { width: Math.round(width), height: Math.round(height), fps: Math.max(1, Math.round(fps)) };
-}
-
-function canonicalResolution(width: number, height: number): { width: number; height: number } | null {
-  if (!width || !height) return null;
-  return { width: Math.max(width, height), height: Math.min(width, height) };
 }
 
 export function cameraResolutionLabel(width: number, height: number): string {
@@ -195,22 +183,8 @@ export function cameraResolutionLabel(width: number, height: number): string {
   return known?.label || `${width} × ${height}`;
 }
 
-function cameraResolutionCandidates(device?: CameraDevice): { width: number; height: number }[] {
-  const candidates: { width: number; height: number }[] = CAMERA_RESOLUTIONS.map(({ width, height }) => ({ width, height }));
-  const seen = new Set(candidates.map((candidate) => `${candidate.width}x${candidate.height}`));
-  for (const [width, height] of [
-    [device?.maxWidth || 0, device?.maxHeight || 0],
-    [device?.defaultWidth || 0, device?.defaultHeight || 0],
-  ]) {
-    const resolution = canonicalResolution(width, height);
-    if (!resolution) continue;
-    const key = `${resolution.width}x${resolution.height}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      candidates.push(resolution);
-    }
-  }
-  return candidates;
+function cameraResolutionCandidates(): { width: number; height: number }[] {
+  return CAMERA_RESOLUTIONS.map(({ width, height }) => ({ width, height }));
 }
 
 export async function probeCameraProfiles(deviceId: string | undefined, portrait: boolean, device?: CameraDevice): Promise<CameraProfile[]> {
@@ -219,7 +193,7 @@ export async function probeCameraProfiles(deviceId: string | undefined, portrait
     device?.maxFps ? Math.round(device.maxFps) : 0,
     device?.defaultFps ? Math.round(device.defaultFps) : 0,
   ])].filter((fps) => fps > 0).sort((a, b) => a - b);
-  const profiles = cameraResolutionCandidates(device).flatMap((resolution) => {
+  const profiles = cameraResolutionCandidates().flatMap((resolution) => {
     const width = portrait ? resolution.height : resolution.width;
     const height = portrait ? resolution.width : resolution.height;
     return fpsCandidates.map((fps) => ({ width, height, fps }));
@@ -231,25 +205,6 @@ export async function probeCameraProfiles(deviceId: string | undefined, portrait
   const addSupported = (profile: CameraProfile) => {
     if (!supported.some((item) => item.width === profile.width && item.height === profile.height && item.fps === profile.fps)) supported.push(profile);
   };
-
-  let nativeStream: MediaStream | null = null;
-  try {
-    nativeStream = await navigator.mediaDevices.getUserMedia({
-      video: nativeCameraConstraints(deviceId, {
-        width: device?.maxWidth,
-        height: device?.maxHeight,
-        fps: device?.maxFps,
-      }),
-      audio: false,
-    });
-    const nativeTrack = nativeStream.getVideoTracks()[0];
-    const nativeProfile = nativeTrack ? profileFromSettings(nativeTrack) : null;
-    if (nativeProfile) addSupported(nativeProfile);
-  } catch {
-    // Continue with exact probes; some browsers reject ideal dimensions.
-  } finally {
-    nativeStream?.getTracks().forEach((track) => track.stop());
-  }
 
   for (const profile of candidates) {
     let stream: MediaStream | null = null;
@@ -275,7 +230,7 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function canRetryNativeCapture(error: unknown): boolean {
+function canRetryCapture(error: unknown): boolean {
   const name = error && typeof error === "object" && "name" in error ? String(error.name) : "";
   return name === "OverconstrainedError" || name === "NotReadableError" || name === "TypeError";
 }
@@ -336,10 +291,10 @@ export async function openCapture(
       audio: input.audioEnabled ? audioConstraints : false,
     });
   } catch (error) {
-    if (!canRetryNativeCapture(error)) throw mediaAccessError(error, input.audioEnabled ? "camera-microphone" : "camera");
+    if (!canRetryCapture(error)) throw mediaAccessError(error, input.audioEnabled ? "camera-microphone" : "camera");
     try {
       sourceStream = await navigator.mediaDevices.getUserMedia({
-        video: nativeCameraConstraints(input.deviceId, { width: input.width, height: input.height, fps: input.fps }),
+        video: cropCameraConstraints(input.deviceId, { width: input.width, height: input.height, fps: input.fps }),
         audio: input.audioEnabled ? audioConstraints : false,
       });
       const retryTrack = sourceStream.getVideoTracks()[0];

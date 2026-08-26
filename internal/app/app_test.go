@@ -258,7 +258,7 @@ func TestLegacyStreamMigrationAddsAudioCodec(t *testing.T) {
 		legacy.Close()
 		t.Fatal(err)
 	}
-	_, err = legacy.Exec(`INSERT INTO streams (id, path, status, codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at) VALUES ('legacy', 'vdo-legacy', 'stopped', 'h264', 1280, 720, 30, 4000, 4000, 0, 0, 0, '', '', 1)`)
+	_, err = legacy.Exec(`INSERT INTO streams (id, path, status, codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at) VALUES ('legacy', 'vdo-legacy', 'stopped', 'h264', 2304, 1728, 30, 4000, 4000, 0, 0, 0, '', '', 1)`)
 	if err != nil {
 		legacy.Close()
 		t.Fatal(err)
@@ -279,6 +279,13 @@ func TestLegacyStreamMigrationAddsAudioCodec(t *testing.T) {
 	if codec != "opus" {
 		t.Fatalf("legacy audio codec = %q, want opus", codec)
 	}
+	var width, height int
+	if err := application.db.QueryRow(`SELECT width, height FROM streams LIMIT 1`).Scan(&width, &height); err != nil {
+		t.Fatal(err)
+	}
+	if width != 1920 || height != 1080 {
+		t.Fatalf("legacy output = %dx%d, want 1920x1080", width, height)
+	}
 }
 
 func TestStreamValidation(t *testing.T) {
@@ -287,17 +294,15 @@ func TestStreamValidation(t *testing.T) {
 		t.Fatalf("valid profile rejected: %v", err)
 	}
 	for name, input := range map[string]createStreamRequest{
-		"codec":      {Codec: "vp9", Width: 1920, Height: 1080, FPS: 30, MaxBitrateKbps: 4000},
-		"resolution": {Codec: "h264", Width: 1281, Height: 800, FPS: 30, MaxBitrateKbps: 4000},
-		"fps":        {Codec: "h264", Width: 1280, Height: 720, FPS: 121, MaxBitrateKbps: 4000},
-		"bitrate":    {Codec: "h264", Width: 1280, Height: 720, FPS: 30, MaxBitrateKbps: 499},
+		"codec":        {Codec: "vp9", Width: 1920, Height: 1080, FPS: 30, MaxBitrateKbps: 4000},
+		"resolution":   {Codec: "h264", Width: 1281, Height: 800, FPS: 30, MaxBitrateKbps: 4000},
+		"aspect ratio": {Codec: "h264", Width: 2304, Height: 1728, FPS: 30, MaxBitrateKbps: 4000},
+		"fps":          {Codec: "h264", Width: 1280, Height: 720, FPS: 121, MaxBitrateKbps: 4000},
+		"bitrate":      {Codec: "h264", Width: 1280, Height: 720, FPS: 30, MaxBitrateKbps: 499},
 	} {
 		if err := input.validate(); err == nil {
 			t.Fatalf("%s profile unexpectedly accepted", name)
 		}
-	}
-	if err := (createStreamRequest{Codec: "h264", Width: 2304, Height: 1728, FPS: 30, MaxBitrateKbps: 4000}).validate(); err != nil {
-		t.Fatalf("native 2304x1728 profile rejected: %v", err)
 	}
 }
 

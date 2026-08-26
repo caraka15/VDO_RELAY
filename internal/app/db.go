@@ -66,6 +66,10 @@ func openDatabase(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate streams audio codec: %w", err)
 	}
+	if err := migrateOutputProfiles(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate stream output profiles: %w", err)
+	}
 	return db, nil
 }
 
@@ -95,6 +99,16 @@ func ensureColumn(db *sql.DB, table, column, definition string) error {
 		return err
 	}
 	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	return err
+}
+
+func migrateOutputProfiles(db *sql.DB) error {
+	_, err := db.Exec(`
+		UPDATE streams
+		SET width = CASE WHEN portrait_mode <> 0 THEN 1080 ELSE 1920 END,
+			height = CASE WHEN portrait_mode <> 0 THEN 1920 ELSE 1080 END
+		WHERE width * 9 <> height * 16
+		  AND width * 16 <> height * 9`)
 	return err
 }
 
