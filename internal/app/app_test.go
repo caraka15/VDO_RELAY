@@ -88,6 +88,11 @@ func TestMediaOriginsAllowBrowserAliases(t *testing.T) {
 	if !strings.Contains(config, "maxReaders: 10") {
 		t.Fatal("each path must allow up to ten readers")
 	}
+	for _, line := range strings.Split(config, "\n") {
+		if line != "" && strings.TrimSpace(line) == "" {
+			t.Fatalf("MediaMTX config contains a whitespace-only YAML line: %q", line)
+		}
+	}
 }
 
 func TestMediaPathStatsUsesInboundBytes(t *testing.T) {

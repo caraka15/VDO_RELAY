@@ -271,7 +271,7 @@ pathDefaults:
 
 paths:
   all_others:
-	`, cert, key, additionalHost, authURL, maxReadersPerPath, recordPath)
+`, cert, key, additionalHost, authURL, maxReadersPerPath, recordPath)
 }
 
 func webRTCAdditionalHost(base string) string {
