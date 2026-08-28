@@ -34,6 +34,8 @@ assert.match(live, /onLeaveHome/, "Live view must provide a reusable Home action
 assert.match(media, /frameRate: \{ exact: profile\.fps \}/, "Camera FPS must be selected with an exact constraint");
 assert.match(media, /defaultWidth/, "Camera probe must retain the default native dimensions");
 assert.match(media, /device\?\.maxWidth/, "Camera probe must test dimensions reported by capabilities");
+assert.match(media, /nativeCameraConstraints/, "Camera probe must open a native capability request");
+assert.match(media, /applyConstraints\(exactCameraConstraints/, "Capture retry must re-apply the exact native profile");
 assert.doesNotMatch(media, /captureStream\(/, "The camera path must not create a canvas capture stream");
 assert.doesNotMatch(media, /document\.createElement\("canvas"\)/, "The camera path must not create a canvas");
 assert.match(media, /RTCRtpSender/, "Codec detection must use the browser WebRTC capability list");

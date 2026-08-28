@@ -67,12 +67,14 @@ src/lib/mediamtx-webrtc-reader.js
 
 ### Capture semantics
 
-`getUserMedia` memakai `width`, `height`, `frameRate`, dan `resizeMode: none`
-dengan constraint `exact`. Preflight mencoba preset umum serta ukuran/FPS
-default dan maksimum yang dilaporkan kamera satu per satu, lalu hanya
-menampilkan kombinasi yang menghasilkan `getSettings()` sesuai permintaan.
-Ukuran native non-preset, misalnya 2304×1728, tetap dapat dipakai bila lolos
-uji.
+`getUserMedia` memakai `resizeMode: none`. Preset umum diuji dengan
+`width`/`height`/`frameRate` `exact`; detector juga membuka satu stream dengan
+ukuran/FPS maksimum/default sebagai native probe. Hanya ukuran/FPS aktual yang
+terlihat di `getSettings()` yang ditampilkan. Ukuran native non-preset, misalnya
+2304×1728, tetap dapat dipakai bila lolos uji. Jika kamera hanya
+mengembalikan orientasi sensor landscape, profile itu tidak ditolak hanya
+karena operator memilih layout portrait; output tetap mengikuti ukuran native
+kamera.
 
 Dimensi track kamera adalah dimensi final yang dikirim. Tidak ada scaling,
 canvas, padding, black bar, atau rotate pada output. CSS rotate di `LiveView`

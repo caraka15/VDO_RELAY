@@ -165,6 +165,26 @@ function exactCameraConstraints(profile: CameraProfile, deviceId?: string): Medi
   } as MediaTrackConstraints;
 }
 
+function nativeCameraConstraints(deviceId?: string, preferred?: Partial<CameraProfile>): MediaTrackConstraints {
+  const constraints: Record<string, unknown> = {
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    resizeMode: { exact: "none" },
+  };
+  if (preferred?.width) constraints.width = { ideal: preferred.width };
+  if (preferred?.height) constraints.height = { ideal: preferred.height };
+  if (preferred?.fps) constraints.frameRate = { ideal: preferred.fps };
+  return constraints as MediaTrackConstraints;
+}
+
+function profileFromSettings(track: MediaStreamTrack): CameraProfile | null {
+  const settings = track.getSettings();
+  const width = finiteNumber(settings.width);
+  const height = finiteNumber(settings.height);
+  const fps = finiteNumber(settings.frameRate);
+  if (!width || !height || !fps) return null;
+  return { width: Math.round(width), height: Math.round(height), fps: Math.max(1, Math.round(fps)) };
+}
+
 function canonicalResolution(width: number, height: number): { width: number; height: number } | null {
   if (!width || !height) return null;
   return { width: Math.max(width, height), height: Math.min(width, height) };
@@ -208,6 +228,28 @@ export async function probeCameraProfiles(deviceId: string | undefined, portrait
   const maxShortSide = device && device.maxWidth && device.maxHeight ? Math.min(device.maxWidth, device.maxHeight) : 0;
   const candidates = profiles.filter((profile) => !maxLongSide || (Math.max(profile.width, profile.height) <= maxLongSide && Math.min(profile.width, profile.height) <= maxShortSide));
   const supported: CameraProfile[] = [];
+  const addSupported = (profile: CameraProfile) => {
+    if (!supported.some((item) => item.width === profile.width && item.height === profile.height && item.fps === profile.fps)) supported.push(profile);
+  };
+
+  let nativeStream: MediaStream | null = null;
+  try {
+    nativeStream = await navigator.mediaDevices.getUserMedia({
+      video: nativeCameraConstraints(deviceId, {
+        width: device?.maxWidth,
+        height: device?.maxHeight,
+        fps: device?.maxFps,
+      }),
+      audio: false,
+    });
+    const nativeTrack = nativeStream.getVideoTracks()[0];
+    const nativeProfile = nativeTrack ? profileFromSettings(nativeTrack) : null;
+    if (nativeProfile) addSupported(nativeProfile);
+  } catch {
+    // Continue with exact probes; some browsers reject ideal dimensions.
+  } finally {
+    nativeStream?.getTracks().forEach((track) => track.stop());
+  }
 
   for (const profile of candidates) {
     let stream: MediaStream | null = null;
@@ -218,7 +260,7 @@ export async function probeCameraProfiles(deviceId: string | undefined, portrait
       const actualWidth = finiteNumber(settings?.width) || 0;
       const actualHeight = finiteNumber(settings?.height) || 0;
       const actualFps = finiteNumber(settings?.frameRate) || 0;
-      if (actualWidth === profile.width && actualHeight === profile.height && actualFps + 1 >= profile.fps) supported.push(profile);
+      if (actualWidth === profile.width && actualHeight === profile.height && actualFps + 1 >= profile.fps) addSupported(profile);
     } catch {
       // The exact camera mode is not available; keep it out of the choices.
     } finally {
@@ -231,6 +273,11 @@ export async function probeCameraProfiles(deviceId: string | undefined, portrait
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function canRetryNativeCapture(error: unknown): boolean {
+  const name = error && typeof error === "object" && "name" in error ? String(error.name) : "";
+  return name === "OverconstrainedError" || name === "NotReadableError" || name === "TypeError";
 }
 
 const videoCandidates = [
@@ -282,19 +329,31 @@ export async function openCapture(
   };
   if (input.audioDeviceId) audioConstraints.deviceId = { exact: input.audioDeviceId };
 
-  let sourceStream: MediaStream;
+  let sourceStream: MediaStream | null = null;
   try {
     sourceStream = await navigator.mediaDevices.getUserMedia({
       video: videoConstraints,
       audio: input.audioEnabled ? audioConstraints : false,
     });
   } catch (error) {
-    throw mediaAccessError(error, input.audioEnabled ? "camera-microphone" : "camera");
+    if (!canRetryNativeCapture(error)) throw mediaAccessError(error, input.audioEnabled ? "camera-microphone" : "camera");
+    try {
+      sourceStream = await navigator.mediaDevices.getUserMedia({
+        video: nativeCameraConstraints(input.deviceId, { width: input.width, height: input.height, fps: input.fps }),
+        audio: input.audioEnabled ? audioConstraints : false,
+      });
+      const retryTrack = sourceStream.getVideoTracks()[0];
+      if (!retryTrack) throw new Error("Tidak ada kamera yang tersedia.");
+      await retryTrack.applyConstraints(exactCameraConstraints({ width: input.width, height: input.height, fps: input.fps }));
+    } catch {
+      sourceStream?.getTracks().forEach((track) => track.stop());
+      throw mediaAccessError(error, input.audioEnabled ? "camera-microphone" : "camera");
+    }
   }
 
-  const sourceTrack = sourceStream.getVideoTracks()[0];
-  if (!sourceTrack) {
-    sourceStream.getTracks().forEach((track) => track.stop());
+  const sourceTrack = sourceStream?.getVideoTracks()[0];
+  if (!sourceStream || !sourceTrack) {
+    sourceStream?.getTracks().forEach((track) => track.stop());
     throw new Error("Tidak ada kamera yang tersedia.");
   }
   const settings = sourceTrack.getSettings();

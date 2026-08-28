@@ -102,8 +102,9 @@ tidak merender ulang file tersebut.
 1. Login dengan `admin/admin` pada instalasi baru, lalu ganti password.
 2. Pilih orientasi yang ingin diminta ke kamera.
 3. Tekan Deteksi. Browser meminta izin kamera dan mikrofon.
-4. Pilih kamera. Resolusi/FPS hanya menampilkan kombinasi yang berhasil diuji
-   dengan constraint `exact`, termasuk mode native yang dilaporkan kamera.
+4. Pilih kamera. Resolusi/FPS hanya menampilkan mode native yang terbaca dari
+   `getSettings()` atau kombinasi yang berhasil diuji dengan constraint `exact`,
+   termasuk mode native yang dilaporkan kamera.
 5. Pilih codec WebRTC yang tersedia, audio Opus, bitrate maksimum, dan record.
 6. Tekan `Create stream`. Ini hanya membuat job dan URL; kamera belum live.
 7. Di halaman job, tekan `Start`. Kamera dibuka ulang, diuji lagi, lalu WHIP
@@ -119,9 +120,10 @@ OBS melalui SRT dan player browser melalui WHEP.
 
 Resolusi/FPS yang dipilih adalah mode capture kamera dan juga ukuran final track
 yang dikirim. Detector juga menguji ukuran/FPS default dan maksimum yang
-dilaporkan kamera, bukan hanya preset 16:9. Tidak ada upscale, canvas, rotate,
-atau black bar yang masuk ke file. Black bar desktop hanya bagian kotak
-preview.
+dilaporkan kamera, bukan hanya preset 16:9. Jika kamera hanya membuka sensor
+native landscape, mode itu tetap dipakai walaupun layout awal portrait. Tidak
+ada upscale, canvas, rotate, atau black bar yang masuk ke file. Black bar
+desktop hanya bagian kotak preview.
 
 Pada mobile, preview mengikuti bentuk aplikasi kamera: stage tetap memenuhi
 layar dan track landscape diputar dengan CSS hanya untuk tampilan. Transform

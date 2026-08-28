@@ -83,10 +83,14 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 - Resolusi dan FPS adalah mode capture kamera serta dimensi final encoded track.
 - Probe memulai dari 1920×1080, 1280×720, dan 854×480 pada FPS 24/30/60,
   lalu menambahkan ukuran/FPS default dan maksimum yang dilaporkan kamera.
-- Hanya kombinasi yang berhasil dibuka dengan constraint `exact` dan cocok
-  dengan `getSettings()` yang ditampilkan. Karena itu mode native seperti
-  2304×1728 juga dapat dipilih bila memang tersedia.
-- Portrait menukar dimensi request kamera, bukan merender canvas baru.
+- Preset diuji dengan constraint `exact`; detector juga membuka satu stream
+  native dengan `resizeMode: none` pada ukuran maksimum/default yang dilaporkan.
+  Hanya mode yang menghasilkan ukuran/FPS aktual yang jelas dari
+  `getSettings()` yang ditampilkan. Karena itu mode native seperti 2304×1728
+  juga dapat dipilih bila memang tersedia.
+- Portrait mencoba pasangan dimensi portrait, tetapi jika kamera hanya
+  menyediakan sensor native landscape, mode native tersebut tetap dipakai dan
+  ditampilkan. Tidak ada rotate atau canvas baru.
 - Nilai bitrate di UI adalah batas maksimum encoder WebRTC.
 - WebRTC boleh mengirim bitrate aktual lebih rendah karena scene atau network;
   aplikasi tidak menjalankan adaptive controller buatan sendiri.
