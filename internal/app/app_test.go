@@ -112,6 +112,32 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestFrontendCacheAndMissingAssetHandling(t *testing.T) {
+	application, err := New(Config{DataDir: t.TempDir(), MaxActiveStreams: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer application.Close()
+
+	index := httptest.NewRecorder()
+	application.publicHandler.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
+	if index.Code != http.StatusOK || index.Header().Get("Cache-Control") != "no-store, max-age=0" {
+		t.Fatalf("index cache policy = %d %q", index.Code, index.Header().Get("Cache-Control"))
+	}
+
+	missing := httptest.NewRecorder()
+	application.publicHandler.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/assets/old-bundle.js", nil))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing bundle status = %d, want 404", missing.Code)
+	}
+
+	api := httptest.NewRecorder()
+	application.publicHandler.ServeHTTP(api, httptest.NewRequest(http.MethodGet, "/api/auth/session", nil))
+	if api.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("API cache policy = %q", api.Header().Get("Cache-Control"))
+	}
+}
+
 func TestDefaultLoginCreatesSession(t *testing.T) {
 	application, err := New(Config{DataDir: t.TempDir(), MaxActiveStreams: 8, InternalAddr: "127.0.0.1:0"})
 	if err != nil {

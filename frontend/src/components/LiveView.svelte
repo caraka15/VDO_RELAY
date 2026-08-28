@@ -37,13 +37,13 @@
 </svelte:head>
 
 <div class="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-  <header class="mb-7 flex flex-wrap items-start justify-between gap-4">
+  <header class="mb-7 flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
     <div>
       <p class="mono mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">STREAM / {stream.id}</p>
       <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Output sedang berjalan</h1>
       <p class="mt-2 text-sm leading-6 text-[var(--muted)]">Preview di bawah adalah frame final yang dikirim ke server.</p>
     </div>
-    <div class="flex items-center gap-3">
+    <div class="flex flex-wrap items-center justify-end gap-2">
       <span class="inline-flex min-h-[44px] items-center gap-2 border px-3 text-sm font-extrabold" style={`border-color:${statusColor};color:${statusColor}`} aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>{statusLabel}
       </span>
@@ -65,9 +65,9 @@
 
   <div class="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
     <section class="panel overflow-hidden" aria-labelledby="preview-heading">
-      <div class="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
-        <h2 id="preview-heading" class="flex items-center gap-2 text-sm font-extrabold"><Activity size={17} class="text-[var(--accent)]" /> Preview output</h2>
-        <span class="mono text-xs font-bold text-[var(--muted)]">{stream.width}×{stream.height} / {stream.fps} FPS</span>
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
+        <h2 id="preview-heading" class="flex min-w-0 items-center gap-2 text-sm font-extrabold"><Activity size={17} class="shrink-0 text-[var(--accent)]" /> Preview output</h2>
+        <span class="mono text-right text-xs font-bold text-[var(--muted)]">{stream.width}×{stream.height} / {stream.fps} FPS</span>
       </div>
       <div bind:this={previewHost} class="aspect-video w-full bg-black"></div>
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border)] px-4 py-3 text-xs font-semibold text-[var(--muted)]">

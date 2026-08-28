@@ -82,7 +82,7 @@
 </svelte:head>
 
 <div class="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-  <header class="mb-7 flex flex-wrap items-start justify-between gap-4">
+  <header class="mb-7 flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
     <div>
       <p class="mono mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">NEW STREAM / 01</p>
       <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Siapkan output</h1>
@@ -130,7 +130,7 @@
 
         <fieldset>
           <legend class="mb-2 block text-sm font-bold">Mode konten</legend>
-          <div class="grid gap-3 sm:grid-cols-2">
+          <div class="grid gap-3 min-[420px]:grid-cols-2">
             <label class="flex min-h-[72px] cursor-pointer items-center gap-3 border p-3 transition-colors" class:border-[var(--accent)]={!portraitMode} class:bg-[var(--surface-strong)]={!portraitMode} class:border-[var(--border)]={portraitMode}>
               <input class="sr-only" type="radio" name="orientation" checked={!portraitMode} on:change={() => (portraitMode = false)} />
               <span class="flex size-9 items-center justify-center border border-[var(--border-strong)] bg-[var(--surface)]"><Video size={18} /></span>

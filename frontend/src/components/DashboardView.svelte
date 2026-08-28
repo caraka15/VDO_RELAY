@@ -25,9 +25,9 @@
 <div class="min-h-dvh">
   <header class="border-b border-[var(--border)] bg-[var(--surface)]">
     <div class="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-      <div class="flex items-center gap-3">
+      <div class="flex min-w-0 items-center gap-3">
         <div class="flex size-10 items-center justify-center border border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--accent)]" aria-hidden="true"><Server size={20} /></div>
-        <div><p class="mono text-xs font-extrabold uppercase tracking-[0.18em] text-[var(--accent)]">VDO / RELAY</p><p class="text-xs font-semibold text-[var(--muted)]">Private streaming console</p></div>
+        <div class="min-w-0"><p class="mono truncate text-xs font-extrabold uppercase tracking-[0.18em] text-[var(--accent)]">VDO / RELAY</p><p class="truncate text-xs font-semibold text-[var(--muted)]">Private streaming console</p></div>
       </div>
       <div class="flex items-center gap-2">
         <span class="hidden text-sm font-bold text-[var(--muted)] sm:inline">{session.username}</span>

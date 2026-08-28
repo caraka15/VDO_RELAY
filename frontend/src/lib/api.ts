@@ -74,23 +74,36 @@ export class APIError extends Error {
 }
 
 async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(url, {
-    credentials: "same-origin",
-    headers: {
-      Accept: "application/json",
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
-      ...init.headers,
-    },
-    ...init,
-  });
-  if (response.status === 204) {
-    return undefined as T;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...init.headers,
+      },
+      ...init,
+      signal: controller.signal,
+    });
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new APIError(payload.error || "Request failed", payload.code, response.status);
+    }
+    return payload as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new APIError("Server tidak merespons dalam 12 detik. Coba refresh setelah memeriksa koneksi.", "request_timeout", 408);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new APIError(payload.error || "Request failed", payload.code, response.status);
-  }
-  return payload as T;
 }
 
 export const getSession = () => request<Session>("/api/auth/session");

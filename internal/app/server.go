@@ -30,6 +30,9 @@ func (a *App) withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src https:; connect-src 'self' https:")
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/healthz" {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -683,6 +686,12 @@ func (a *App) serveFrontend(w http.ResponseWriter, r *http.Request) {
 	assetPath := "dist/" + requested
 	data, err := fsReadFile(assetPath)
 	if err != nil {
+		// Only extensionless paths are client-side routes. Returning index.html
+		// for a missing JS/CSS file makes stale cached HTML look like a bundle.
+		if path.Ext(requested) != "" {
+			http.NotFound(w, r)
+			return
+		}
 		requested = "index.html"
 		assetPath = "dist/index.html"
 		data, err = fsReadFile(assetPath)
@@ -698,6 +707,8 @@ func (a *App) serveFrontend(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	if strings.HasSuffix(requested, ".js") || strings.HasSuffix(requested, ".css") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else if requested == "index.html" {
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
 	}
 	if r.Method == http.MethodHead {
 		return

@@ -92,7 +92,9 @@
       session = current;
       page = current.mustChangePassword ? "password" : "dashboard";
       if (!current.mustChangePassword) {
-        await Promise.all([refreshDashboard(), loadCapabilities()]);
+        void Promise.all([refreshDashboard(), loadCapabilities()]).catch((error) => {
+          dashboardError = errorMessage(error, "Data awal belum bisa dimuat.");
+        });
       }
     } catch (error) {
       loginError = errorMessage(error);

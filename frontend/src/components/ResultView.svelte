@@ -40,7 +40,7 @@
 </svelte:head>
 
 <div class="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-  <header class="mb-7 flex flex-wrap items-start justify-between gap-4">
+  <header class="mb-7 flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
     <div>
       <p class="mono mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">RESULT / {stream.id}</p>
       <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Hasil stream</h1>

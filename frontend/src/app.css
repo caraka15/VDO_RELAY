@@ -22,18 +22,29 @@
 }
 
 html {
-  min-width: 320px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   background: var(--bg);
+  overflow-x: hidden;
 }
 
 body {
-  min-width: 320px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 100dvh;
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font-size: 16px;
   line-height: 1.5;
+  overflow-x: hidden;
+}
+
+#app {
+  min-width: 0;
+  max-width: 100%;
 }
 
 button,
@@ -70,18 +81,29 @@ select:focus-visible {
 .mono {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .panel {
+  min-width: 0;
   border: 1px solid var(--border);
   background: var(--surface);
 }
 
 .field {
+  min-width: 0;
+  max-width: 100%;
   min-height: 46px;
   border: 1px solid var(--border-strong);
   background: var(--surface-raised);
   color: var(--text);
+}
+
+img,
+video,
+canvas,
+iframe {
+  max-width: 100%;
 }
 
 .field:hover:not(:disabled) {
