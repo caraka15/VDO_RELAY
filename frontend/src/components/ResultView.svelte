@@ -5,7 +5,6 @@
 
   export let stream: Stream;
   export let stats: StreamStats | null = null;
-  export let targetBitrateKbps = 0;
   export let publisherStatus: "ready" | "connecting" | "live" | "error" = "ready";
   export let onBack: () => void;
   export let onStop: () => void | Promise<boolean>;
@@ -78,7 +77,7 @@
       </div>
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border)] px-4 py-3 text-xs font-semibold text-[var(--muted)]">
         <span>{stream.width}×{stream.height} / {stream.fps} FPS</span>
-        <span>Target {formatBitrate(targetBitrateKbps)}</span>
+        <span>Max {formatBitrate(stream.maxBitrateKbps)}</span>
         <span>Diterima {formatBitrate(stats?.receivedBitrateKbps)}</span>
         <span class="inline-flex items-center gap-2"><span class="status-dot text-[var(--success)]"></span> Tanpa transcoding</span>
       </div>

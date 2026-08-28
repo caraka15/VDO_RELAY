@@ -35,7 +35,7 @@
   let fps = 30;
   let maxBitrateKbps = 4000;
   let audioEnabled = true;
-  let audioCodec: "aac" | "opus" = "opus";
+  let audioCodec: "opus" = "opus";
   let record = false;
   let cameraProfiles: CameraProfile[] = [];
   let profileChecking = false;
@@ -70,10 +70,10 @@
   $: outputWidth = outputSize.width;
   $: outputHeight = outputSize.height;
   $: estimatedHourlyGB = ((maxBitrateKbps * 1000) / 8 * 3600) / 1024 ** 3;
-  $: outputProfileKey = `${selectedCodec}:${outputWidth}x${outputHeight}:${fps}`;
+  $: outputProfileKey = selectedCodec;
   $: if (outputProfileKey !== lastOutputProbe) {
     lastOutputProbe = outputProfileKey;
-    void checkOutputProfile(outputProfileKey, selectedCodec, outputWidth, outputHeight, fps);
+    void checkOutputProfile(outputProfileKey, selectedCodec);
   }
   $: profileProbeKey = `${selectedDeviceId || "default"}:${outputOrientation}`;
   $: if (devices.length > 0 && !detecting && profileProbeKey !== lastProfileProbe) {
@@ -107,17 +107,12 @@
     }
   }
 
-  async function checkOutputProfile(key: string, codec: string, width: number, height: number, targetFps: number) {
+  async function checkOutputProfile(key: string, codec: string) {
     const sequence = ++outputProbeSequence;
-    if (!width || !height) {
-      outputChecking = false;
-      outputSupported = null;
-      return;
-    }
     outputChecking = true;
     outputSupported = null;
     try {
-      const capabilities = await probeVideoCodecs(width, height, targetFps);
+      const capabilities = await probeVideoCodecs();
       if (sequence !== outputProbeSequence || key !== outputProfileKey) return;
       outputSupported = capabilities.some((item) => item.key === codec && item.supported && item.srtCompatible);
     } catch {
@@ -135,7 +130,7 @@
     if (codec === "h264" && maxBitrateKbps === 4000) maxBitrateKbps = 7000;
   }
 
-  function chooseAudioCodec(codec: "aac" | "opus") {
+  function chooseAudioCodec(codec: "opus") {
     if (!audioCodecs.some((item) => item.key === codec && item.supported)) return;
     audioCodec = codec;
   }
@@ -186,7 +181,7 @@
   <section class="panel mb-5 p-5 sm:p-6" aria-labelledby="orientation-heading">
     <div class="mb-4 flex items-center gap-2 text-[var(--accent)]"><Video size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">STEP 01 / ORIENTATION</span></div>
     <h2 id="orientation-heading" class="text-xl font-extrabold">Orientasi frame kamera</h2>
-    <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilihan ini menentukan ukuran frame yang diminta langsung dari kamera. Saat live orientasi dikunci; putar perangkat hanya mengubah preview, bukan isi output.</p>
+    <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilihan ini menentukan orientasi frame yang diminta langsung dari kamera. Saat live orientasi dikunci; tidak ada canvas, rotate, atau scaling di browser.</p>
     <div class="mt-5 grid gap-3 sm:grid-cols-2">
       <label class="flex min-h-[78px] cursor-pointer items-center gap-3 border p-4" class:border-[var(--accent)]={outputOrientation === "landscape"} class:bg-[var(--surface-strong)]={outputOrientation === "landscape"} class:border-[var(--border)]={outputOrientation !== "landscape"}>
         <input class="sr-only" type="radio" name="output-orientation" value="landscape" bind:group={outputOrientation} />
@@ -201,14 +196,16 @@
 
   <div class="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(290px,0.65fr)]">
     <section class="panel p-5 sm:p-6" aria-labelledby="output-heading">
-      <div class="mb-5 flex items-center gap-2 text-[var(--accent)]"><ShieldCheck size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">STEP 02 / OUTPUT</span></div>
-      <h2 id="output-heading" class="text-xl font-extrabold">Codec dan mode kamera</h2>
-      <p class="mt-2 max-w-xl text-sm leading-6 text-[var(--muted)]">Resolusi dan FPS di sini adalah mode capture kamera sekaligus ukuran encoder. Kamera harus menghasilkan ukuran yang sama persis; browser tidak mengisi canvas dan tidak melakukan rotate.</p>
+      <div class="mb-5 flex items-center gap-2 text-[var(--accent)]"><ShieldCheck size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">STEP 02 / PROFILE</span></div>
+      <h2 id="output-heading" class="text-xl font-extrabold">Codec dan mode final</h2>
+      <p class="mt-2 max-w-xl text-sm leading-6 text-[var(--muted)]">Resolusi dan FPS di sini adalah mode kamera yang akan menjadi ukuran final encoded track. Browser tidak mengisi canvas, tidak rotate, dan tidak meng-upscale.</p>
 
       <div class="mt-5 grid grid-cols-2 gap-3">
         <button class="min-h-[74px] border p-3 text-left transition-colors" class:border-[var(--accent)]={selectedCodec === "h264"} class:bg-[var(--surface-strong)]={selectedCodec === "h264"} class:border-[var(--border)]={selectedCodec !== "h264"} type="button" on:click={() => chooseCodec("h264")} disabled={!h264?.supported}><span class="mono block text-sm font-extrabold">H.264</span><span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h264?.supported} class:text-[var(--faint)]={!h264?.supported}>{h264?.supported ? "terdeteksi · SRT" : "tidak terdeteksi"}</span></button>
         <button class="min-h-[74px] border p-3 text-left transition-colors" class:border-[var(--accent)]={selectedCodec === "h265"} class:bg-[var(--surface-strong)]={selectedCodec === "h265"} class:border-[var(--border)]={selectedCodec !== "h265"} type="button" on:click={() => chooseCodec("h265")} disabled={!h265?.supported}><span class="mono block text-sm font-extrabold">H.265</span><span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h265?.supported} class:text-[var(--faint)]={!h265?.supported}>{h265?.supported ? "terdeteksi · SRT" : "tidak terdeteksi"}</span></button>
       </div>
+
+      <p class="mt-3 text-xs font-semibold leading-5 text-[var(--faint)]">Capability WebRTC lain: {codecs.filter((codec) => !codec.srtCompatible).map((codec) => `${codec.label} ${codec.supported ? "tersedia" : "tidak tersedia"}`).join(" Â· ") || "belum dibaca"}. V1 SRT memakai H.264 atau H.265.</p>
 
       <div class="mt-5 grid gap-4 sm:grid-cols-2">
         <div><label for="resolution" class="mb-2 block text-sm font-bold">Resolusi kamera</label><select id="resolution" class="field w-full px-3" bind:value={resolutionKey} disabled={profileChecking || availableResolutions.length === 0}>{#if availableResolutions.length === 0}<option value="">{profileChecking ? "Memeriksa kamera..." : "Tidak ada mode terbukti"}</option>{/if}{#each availableResolutions as option}<option value={resolutionValue(option)}>{resolutionValue(option)} · {option.label}</option>{/each}</select></div>
@@ -225,12 +222,12 @@
         {#if profileError}<p class="mt-3 border border-[#844a52] bg-[#321c22] p-3 text-xs font-semibold leading-5 text-[var(--danger)]" role="alert">{profileError}</p>{/if}
         <div class="mt-3 flex items-start gap-2 border-t border-[var(--border)] pt-3 text-xs font-bold" aria-live="polite">
           {#if outputChecking}<Activity size={15} class="mt-0.5 shrink-0 animate-pulse text-[var(--warning)]" /><span class="text-[var(--warning)]">Memeriksa encoder {selectedCodec.toUpperCase()}...</span>
-          {:else if outputSupported}<Check size={15} class="mt-0.5 shrink-0 text-[var(--success)]" /><span class="text-[var(--success)]">Encoder output ini mendukung mode yang dipilih.</span>
-          {:else}<X size={15} class="mt-0.5 shrink-0 text-[var(--danger)]" /><span class="text-[var(--danger)]">Encoder tidak mendukung mode ini.</span>{/if}
+          {:else if outputSupported}<Check size={15} class="mt-0.5 shrink-0 text-[var(--success)]" /><span class="text-[var(--success)]">Codec ini tersedia untuk WHIP dan output SRT.</span>
+          {:else}<X size={15} class="mt-0.5 shrink-0 text-[var(--danger)]" /><span class="text-[var(--danger)]">Codec ini tidak tersedia di browser.</span>{/if}
         </div>
       </div>
 
-      <div class="mt-5"><label for="max-bitrate" class="mb-2 flex items-center justify-between text-sm font-bold"><span>Max bitrate</span><span class="mono text-[var(--accent)]">{maxBitrateKbps} kbps</span></label><input id="max-bitrate" class="field w-full px-3" type="number" min="500" max="12000" step="100" bind:value={maxBitrateKbps} /><p class="mt-2 text-xs font-semibold text-[var(--faint)]">Target mulai dari nilai ini. Adaptive bitrate hanya mengubah bitrate, bukan resolusi, FPS, orientasi, atau codec.</p></div>
+      <div class="mt-5"><label for="max-bitrate" class="mb-2 flex items-center justify-between text-sm font-bold"><span>Max bitrate</span><span class="mono text-[var(--accent)]">{maxBitrateKbps} kbps</span></label><input id="max-bitrate" class="field w-full px-3" type="number" min="500" max="12000" step="100" bind:value={maxBitrateKbps} /><p class="mt-2 text-xs font-semibold text-[var(--faint)]">WebRTC memakai nilai ini sebagai batas maksimum; bitrate aktual dapat lebih rendah karena scene atau jaringan.</p></div>
     </section>
 
     <aside class="space-y-5">

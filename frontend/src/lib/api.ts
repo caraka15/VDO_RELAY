@@ -9,7 +9,7 @@ export type Stream = {
   path: string;
   status: "ready" | "connecting" | "live" | "stopped" | "failed";
   codec: "h264" | "h265";
-  audioCodec: "aac" | "opus";
+  audioCodec: "opus";
   width: number;
   height: number;
   fps: number;
@@ -19,8 +19,7 @@ export type Stream = {
   audioEnabled: boolean;
   record: boolean;
   createdAt: string;
-  publishUrl?: string;
-  fingerprintUrl?: string;
+  whipUrl?: string;
   publishToken?: string;
   srtUrl?: string;
   playerUrl?: string;
@@ -53,7 +52,7 @@ export type Recording = {
 
 export type StartStreamInput = {
   codec: "h264" | "h265";
-  audioCodec: "aac" | "opus";
+  audioCodec: "opus";
   width: number;
   height: number;
   fps: number;

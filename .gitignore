@@ -5,10 +5,12 @@
 /data/
 /certs/*
 !/certs/.gitkeep
+/tools/
 
 # Frontend dependencies and build output
 frontend/node_modules/
 frontend/dist/
+/web/dist/assets/
 frontend/.svelte-kit/
 coverage/
 npm-debug.log*

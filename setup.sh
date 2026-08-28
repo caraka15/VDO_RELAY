@@ -112,7 +112,7 @@ ask_hostname() {
       printf '%s' "$value"
       return
     fi
-    warn "Hostname tidak valid: $value. Masukkan FQDN seperti app.example.com."
+    warn "Hostname tidak valid: $value. Masukkan FQDN seperti example.com."
   done
 }
 
@@ -238,14 +238,15 @@ write_env() {
   temp_file
   output="$LAST_TEMP_FILE"
   awk -v public_origin="$VDO_PUBLIC_ORIGIN" \
-    -v moq_url="$VDO_MOQ_PUBLIC_BASE_URL" \
+    -v webrtc_url="$VDO_WEBRTC_PUBLIC_BASE_URL" \
     -v srt_host="$VDO_SRT_PUBLIC_HOST" '
     /^[[:space:]]*VDO_PUBLIC_ORIGIN[[:space:]]*=/ {
       if (!seen["VDO_PUBLIC_ORIGIN"]++) print "VDO_PUBLIC_ORIGIN=" public_origin
       next
     }
-    /^[[:space:]]*VDO_MOQ_PUBLIC_BASE_URL[[:space:]]*=/ {
-      if (!seen["VDO_MOQ_PUBLIC_BASE_URL"]++) print "VDO_MOQ_PUBLIC_BASE_URL=" moq_url
+    /^[[:space:]]*VDO_MOQ_PUBLIC_BASE_URL[[:space:]]*=/ { next }
+    /^[[:space:]]*VDO_WEBRTC_PUBLIC_BASE_URL[[:space:]]*=/ {
+      if (!seen["VDO_WEBRTC_PUBLIC_BASE_URL"]++) print "VDO_WEBRTC_PUBLIC_BASE_URL=" webrtc_url
       next
     }
     /^[[:space:]]*VDO_SRT_PUBLIC_HOST[[:space:]]*=/ {
@@ -255,7 +256,7 @@ write_env() {
     { print }
     END {
       if (!seen["VDO_PUBLIC_ORIGIN"]) print "VDO_PUBLIC_ORIGIN=" public_origin
-      if (!seen["VDO_MOQ_PUBLIC_BASE_URL"]) print "VDO_MOQ_PUBLIC_BASE_URL=" moq_url
+      if (!seen["VDO_WEBRTC_PUBLIC_BASE_URL"]) print "VDO_WEBRTC_PUBLIC_BASE_URL=" webrtc_url
       if (!seen["VDO_SRT_PUBLIC_HOST"]) print "VDO_SRT_PUBLIC_HOST=" srt_host
     }
   ' "$input" > "$output"
@@ -282,7 +283,8 @@ install_nginx_config() {
   if sudo test -f "$available" && sudo grep -Fq '# VDO Relay Nginx vhost.' "$available"; then
     has_vdo='yes'
     if sudo grep -Fq "server_name $APP_DOMAIN;" "$available" \
-      && sudo grep -Fq "server_name $MEDIA_DOMAIN;" "$available"; then
+      && sudo grep -Fq "server_name $MEDIA_DOMAIN;" "$available" \
+      && sudo grep -Fq 'proxy_pass https://127.0.0.1:8889;' "$available"; then
       has_domains='yes'
     fi
   fi
@@ -430,7 +432,7 @@ media_http_status() {
 
 health_check() {
   local app_url="https://$APP_DOMAIN/healthz"
-  local media_url="https://$MEDIA_DOMAIN:8892/"
+  local media_url="https://$MEDIA_DOMAIN/healthz"
   local media_status
   local attempt
   local failures=0
@@ -487,7 +489,7 @@ main() {
   existing_app="$(env_value VDO_PUBLIC_ORIGIN)"
   existing_media="$(env_value VDO_SRT_PUBLIC_HOST)"
   app_default="$(host_from_url "$existing_app")"
-  media_default="${existing_media:-$(host_from_url "$(env_value VDO_MOQ_PUBLIC_BASE_URL)")}"
+  media_default="${existing_media:-$(host_from_url "$(env_value VDO_WEBRTC_PUBLIC_BASE_URL)")}"
   app_default="${app_default:-app.example.com}"
   media_default="${media_default:-media.example.com}"
 
@@ -505,7 +507,7 @@ main() {
   PUBLIC_IPV4="$(ask_public_ipv4 "$detected_ip")"
   CERTBOT_EMAIL="admin@$MEDIA_DOMAIN"
   VDO_PUBLIC_ORIGIN="https://$APP_DOMAIN"
-  VDO_MOQ_PUBLIC_BASE_URL="https://$MEDIA_DOMAIN:8892"
+  VDO_WEBRTC_PUBLIC_BASE_URL="https://$MEDIA_DOMAIN"
   VDO_SRT_PUBLIC_HOST="$MEDIA_DOMAIN"
 
   log 'Menyimpan konfigurasi domain ke .env'
@@ -556,15 +558,15 @@ Setup selesai.
 
 Web app:       https://$APP_DOMAIN
 Health app:    https://$APP_DOMAIN/healthz
-Media check:   https://$MEDIA_DOMAIN:8892/
+Media health:  https://$MEDIA_DOMAIN/healthz
 SRT output:    srt://$MEDIA_DOMAIN:8890
 Login awal:    admin / admin (wajib ganti password)
 
 Pastikan firewall/security group membuka:
-  80/tcp  443/tcp  8892/tcp  8892/udp  8890/udp
+  80/tcp  443/tcp  8189/udp  8890/udp
 
-Nginx hanya menangani web dan ACME. SRT serta WebTransport tetap langsung ke
-port MediaMTX 8890/8892.
+Nginx menangani web dan WHIP/WHEP. ICE WebRTC UDP 8189 dan SRT 8890 tetap
+langsung menuju server.
 ${compose_user_note}
 EOF
 

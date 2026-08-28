@@ -9,7 +9,7 @@ export type VideoCapability = {
 };
 
 export type AudioCapability = {
-  key: "aac" | "opus";
+  key: "opus";
   label: string;
   codec: string;
   supported: boolean;
@@ -55,7 +55,6 @@ export type CaptureSession = {
 export type Publisher = {
   close: () => void;
   setVideoBitrate?: (kbps: number) => void;
-  getTransportQueueSize?: () => number | null;
 };
 
 export type MediaDeviceRequest = "camera" | "microphone" | "camera-microphone";
@@ -139,39 +138,6 @@ function exactCameraConstraints(profile: CameraProfile, deviceId?: string): Medi
   } as MediaTrackConstraints;
 }
 
-type DirectFrameInfo = {
-  width: number;
-  height: number;
-  rotation: number;
-};
-
-async function inspectFirstFrame(track: MediaStreamTrack): Promise<DirectFrameInfo> {
-  const TrackProcessor = (globalThis as any).MediaStreamTrackProcessor;
-  if (!TrackProcessor) throw new Error("MediaStreamTrackProcessor tidak tersedia di browser ini.");
-  const probeTrack = track.clone();
-  const probeProcessor = new TrackProcessor({ track: probeTrack });
-  const probeReader = probeProcessor.readable.getReader();
-  let firstFrame: VideoFrame | null = null;
-  try {
-    const result = await Promise.race([
-      probeReader.read(),
-      new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("Frame kamera pertama tidak masuk.")), 5_000)),
-    ]) as ReadableStreamReadResult<VideoFrame>;
-    if (result.done || !result.value) throw new Error("Frame kamera pertama tidak tersedia.");
-    firstFrame = result.value;
-    return {
-      width: Number(firstFrame.codedWidth || firstFrame.displayWidth || 0),
-      height: Number(firstFrame.codedHeight || firstFrame.displayHeight || 0),
-      rotation: Number((firstFrame as VideoFrame & { rotation?: number }).rotation || 0),
-    };
-  } finally {
-    firstFrame?.close();
-    await probeReader.cancel().catch(() => undefined);
-    probeReader.releaseLock();
-    probeTrack.stop();
-  }
-}
-
 export async function probeCameraProfiles(deviceId: string | undefined, portrait: boolean, device?: CameraDevice): Promise<CameraProfile[]> {
   const profiles = CAMERA_RESOLUTIONS.flatMap((resolution) => {
     const width = portrait ? resolution.height : resolution.width;
@@ -192,8 +158,7 @@ export async function probeCameraProfiles(deviceId: string | undefined, portrait
       const actualWidth = finiteNumber(settings?.width) || 0;
       const actualHeight = finiteNumber(settings?.height) || 0;
       const actualFps = finiteNumber(settings?.frameRate) || 0;
-      const frame = track ? await inspectFirstFrame(track) : null;
-      if (actualWidth === profile.width && actualHeight === profile.height && actualFps + 1 >= profile.fps && frame?.rotation === 0 && frame.width === profile.width && frame.height === profile.height) supported.push(profile);
+      if (actualWidth === profile.width && actualHeight === profile.height && actualFps + 1 >= profile.fps) supported.push(profile);
     } catch {
       // The exact camera mode is not available; keep it out of the choices.
     } finally {
@@ -209,70 +174,37 @@ function finiteNumber(value: unknown): number | null {
 }
 
 const videoCandidates = [
-  { key: "av1", label: "AV1", codecs: ["av01.0.04M.08"], srtCompatible: false },
-  { key: "vp9", label: "VP9", codecs: ["vp09.00.10.08"], srtCompatible: false },
-  { key: "vp8", label: "VP8", codecs: ["vp8"], srtCompatible: false },
-  { key: "h264", label: "H.264", codecs: ["avc3.640028", "avc1.640028", "avc1.4D4028", "avc1.4D401F"], srtCompatible: true },
-  { key: "h265", label: "H.265", codecs: ["hev1.1.6.L93.B0", "hvc1.1.6.L93.B0"], srtCompatible: true },
+  { key: "av1", label: "AV1", mime: "video/AV1", srtCompatible: false },
+  { key: "vp9", label: "VP9", mime: "video/VP9", srtCompatible: false },
+  { key: "vp8", label: "VP8", mime: "video/VP8", srtCompatible: false },
+  { key: "h264", label: "H.264", mime: "video/H264", srtCompatible: true },
+  { key: "h265", label: "H.265", mime: "video/H265", srtCompatible: true },
 ] as const;
 
-export async function probeVideoCodecs(width = 1280, height = 720, fps = 30): Promise<VideoCapability[]> {
-  const encoder = (globalThis as any).VideoEncoder;
-  if (!encoder?.isConfigSupported) return [];
-  return Promise.all(
-    videoCandidates.map(async (candidate) => {
-      for (const codec of candidate.codecs) {
-        try {
-          const result = await encoder.isConfigSupported({
-            codec,
-            width,
-            height,
-            bitrate: 5_000_000,
-            framerate: fps,
-            latencyMode: "realtime",
-            hardwareAcceleration: "prefer-hardware",
-          });
-          if (result.supported === true) return { key: candidate.key, label: candidate.label, codec, srtCompatible: candidate.srtCompatible, supported: true };
-        } catch {
-          // Try the next browser-specific codec string.
-        }
-      }
-      return { key: candidate.key, label: candidate.label, codec: candidate.codecs[0], srtCompatible: candidate.srtCompatible, supported: false };
-    }),
-  );
+export async function probeVideoCodecs(): Promise<VideoCapability[]> {
+  const capabilities = (globalThis as any).RTCRtpSender?.getCapabilities?.("video")?.codecs || [];
+  return videoCandidates.map((candidate) => ({
+    key: candidate.key,
+    label: candidate.label,
+    codec: candidate.mime,
+    srtCompatible: candidate.srtCompatible,
+    supported: capabilities.some((codec: { mimeType?: string }) => String(codec.mimeType).toLowerCase() === candidate.mime.toLowerCase()),
+  }));
 }
 
 export async function probeAudioCodecs(): Promise<AudioCapability[]> {
-  const encoder = (globalThis as any).AudioEncoder;
-  if (!encoder?.isConfigSupported) return [];
-  const candidates = [
-    { key: "aac" as const, label: "AAC", codec: "mp4a.40.2" },
-    { key: "opus" as const, label: "Opus", codec: "opus" },
-  ];
-  return Promise.all(
-    candidates.map(async (candidate) => {
-      try {
-        const result = await encoder.isConfigSupported({
-          codec: candidate.codec,
-          sampleRate: 48_000,
-          numberOfChannels: 2,
-          bitrate: 128_000,
-        });
-        return { ...candidate, supported: result.supported === true };
-      } catch {
-        return { ...candidate, supported: false };
-      }
-    }),
-  );
+  const capabilities = (globalThis as any).RTCRtpSender?.getCapabilities?.("audio")?.codecs || [];
+  const opusSupported = capabilities.some((codec: { mimeType?: string }) => String(codec.mimeType).toLowerCase() === "audio/opus");
+  return [{ key: "opus" as const, label: "Opus", codec: "opus", supported: opusSupported }];
 }
 
 export function assertBrowserMediaSupport(audioEnabled = true): void {
   const missing: string[] = [];
   if (!navigator.mediaDevices?.getUserMedia) missing.push("camera API");
-  if (!(globalThis as any).VideoEncoder) missing.push("WebCodecs VideoEncoder");
-  if (audioEnabled && !(globalThis as any).AudioEncoder) missing.push("WebCodecs AudioEncoder");
-  if (!(globalThis as any).MediaStreamTrackProcessor) missing.push("MediaStreamTrackProcessor");
-  if (!(globalThis as any).WebTransport) missing.push("WebTransport");
+  if (!(globalThis as any).RTCPeerConnection) missing.push("WebRTC");
+  if (!(globalThis as any).RTCRtpSender?.getCapabilities) missing.push("WebRTC codec capabilities");
+  const audioCodecs = (globalThis as any).RTCRtpSender?.getCapabilities?.("audio")?.codecs || [];
+  if (audioEnabled && !audioCodecs.some((codec: { mimeType?: string }) => String(codec.mimeType).toLowerCase() === "audio/opus")) missing.push("WebRTC Opus audio");
   if (missing.length > 0) {
     throw new Error(`Browser belum mendukung: ${missing.join(", ")}. Buka dengan Chrome HTTPS terbaru.`);
   }
@@ -312,13 +244,11 @@ export async function openCapture(
     throw new Error(`Kamera hanya menghasilkan ${actualFps ? `${Math.round(actualFps * 10) / 10} FPS` : "FPS yang tidak diketahui"}; profile meminta ${input.fps} FPS. Tidak ada fallback.`);
   }
 
-  try {
-    const frame = await inspectFirstFrame(sourceTrack);
-    if (frame.rotation % 360 !== 0) throw new Error("Browser mengirim orientasi kamera sebagai metadata rotation. Mode direct tanpa canvas tidak dapat menjamin hasil SRT/OBS.");
-    if (frame.width !== input.width || frame.height !== input.height) throw new Error(`Frame kamera aktual ${frame.width} × ${frame.height}, sedangkan profile meminta ${input.width} × ${input.height}. Pilih profile kamera yang sesuai.`);
-  } catch (error) {
+  const actualWidth = finiteNumber(settings.width) || 0;
+  const actualHeight = finiteNumber(settings.height) || 0;
+  if (actualWidth !== input.width || actualHeight !== input.height) {
     sourceStream.getTracks().forEach((track) => track.stop());
-    throw error;
+    throw new Error(`Kamera aktual ${actualWidth || "?"} × ${actualHeight || "?"}, sedangkan profile meminta ${input.width} × ${input.height}. Pilih profile kamera yang sesuai.`);
   }
 
   const audioTracks = input.audioEnabled ? sourceStream.getAudioTracks() : [];
@@ -372,9 +302,8 @@ export async function openCapture(
   };
 }
 
-export async function startMoqPublisher(options: {
-  publishUrl: string;
-  fingerprintUrl: string;
+export async function startWhipPublisher(options: {
+  whipUrl: string;
   publishToken: string;
   capture: CaptureSession;
   codec: VideoCapability;
@@ -383,74 +312,17 @@ export async function startMoqPublisher(options: {
   onConnected: () => void;
   onError: (message: string) => void;
 }): Promise<Publisher> {
-  const { MediaMTXMoQPublisher } = await import("./mediamtx-publisher.js");
-  return new (MediaMTXMoQPublisher as any)({
-    fingerprintUrl: options.fingerprintUrl,
-    url: options.publishUrl,
+  const { MediaMTXWebRTCPublisher } = await import("./mediamtx-webrtc-publisher.js");
+  return new (MediaMTXWebRTCPublisher as any)({
+    url: options.whipUrl,
     token: options.publishToken,
     stream: options.capture.stream,
     videoCodec: options.codec.codec,
     videoBitrate: options.input.maxBitrateKbps,
     videoFramerate: options.input.fps,
-    videoKeyframeInterval: options.input.fps * 2,
-    videoWidth: options.input.width,
-    videoHeight: options.input.height,
     audioCodec: options.audioCodec?.codec || "opus",
     audioBitrate: 128,
     onConnected: options.onConnected,
     onError: options.onError,
   }) as Publisher;
-}
-
-export function startAdaptiveBitrate(
-  publisher: Publisher,
-  maxBitrateKbps: number,
-  callbacks: { onTarget: (target: number) => void; onFailure: () => void },
-): () => void {
-  const floor = Math.max(256, Math.floor(maxBitrateKbps * 0.25));
-  let target = maxBitrateKbps;
-  let pressureSince = 0;
-  let stableSince = 0;
-  let stopped = false;
-  const applyTarget = (next: number) => {
-    try {
-      publisher.setVideoBitrate?.(next);
-      callbacks.onTarget(next);
-      return true;
-    } catch {
-      callbacks.onFailure();
-      stopped = true;
-      return false;
-    }
-  };
-  const timer = window.setInterval(() => {
-    if (stopped || !publisher.getTransportQueueSize) return;
-    const queueSize = publisher.getTransportQueueSize();
-    const now = Date.now();
-    if (queueSize !== null && queueSize > 6) {
-      stableSince = 0;
-      pressureSince ||= now;
-      if (now - pressureSince >= 5_000) {
-        if (target <= floor) {
-          callbacks.onFailure();
-          return;
-        }
-        target = Math.max(floor, Math.floor((target * 0.8) / 10) * 10);
-        if (!applyTarget(target)) return;
-        pressureSince = now;
-      }
-      return;
-    }
-    pressureSince = 0;
-    stableSince ||= now;
-    if (now - stableSince >= 15_000 && target < maxBitrateKbps) {
-      target = Math.min(maxBitrateKbps, Math.ceil((target * 1.1) / 10) * 10);
-      if (!applyTarget(target)) return;
-      stableSince = now;
-    }
-  }, 2_000);
-  return () => {
-    stopped = true;
-    window.clearInterval(timer);
-  };
 }

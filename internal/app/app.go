@@ -25,17 +25,17 @@ const (
 )
 
 type Config struct {
-	DataDir          string
-	MediaMTXBinary   string
-	PublicAddr       string
-	InternalAddr     string
-	TLSCertFile      string
-	TLSKeyFile       string
-	ControlURL       string
-	MoQPublicBaseURL string
-	SRTPublicHost    string
-	PublicOrigin     string
-	MaxActiveStreams int
+	DataDir             string
+	MediaMTXBinary      string
+	PublicAddr          string
+	InternalAddr        string
+	TLSCertFile         string
+	TLSKeyFile          string
+	ControlURL          string
+	WebRTCPublicBaseURL string
+	SRTPublicHost       string
+	PublicOrigin        string
+	MaxActiveStreams    int
 }
 
 func DefaultConfig() Config {
@@ -65,17 +65,17 @@ func DefaultConfig() Config {
 	}
 
 	return Config{
-		DataDir:          dataDir,
-		MediaMTXBinary:   envOr("VDO_MEDIAMTX_BIN", "/usr/local/bin/mediamtx"),
-		PublicAddr:       publicAddr,
-		InternalAddr:     envOr("VDO_INTERNAL_ADDR", "127.0.0.1:8080"),
-		TLSCertFile:      certFile,
-		TLSKeyFile:       keyFile,
-		ControlURL:       envOr("VDO_MEDIAMTX_CONTROL_URL", "http://127.0.0.1:9997"),
-		MoQPublicBaseURL: strings.TrimRight(os.Getenv("VDO_MOQ_PUBLIC_BASE_URL"), "/"),
-		SRTPublicHost:    os.Getenv("VDO_SRT_PUBLIC_HOST"),
-		PublicOrigin:     strings.TrimRight(os.Getenv("VDO_PUBLIC_ORIGIN"), "/"),
-		MaxActiveStreams: maxStreams,
+		DataDir:             dataDir,
+		MediaMTXBinary:      envOr("VDO_MEDIAMTX_BIN", "/usr/local/bin/mediamtx"),
+		PublicAddr:          publicAddr,
+		InternalAddr:        envOr("VDO_INTERNAL_ADDR", "127.0.0.1:8080"),
+		TLSCertFile:         certFile,
+		TLSKeyFile:          keyFile,
+		ControlURL:          envOr("VDO_MEDIAMTX_CONTROL_URL", "http://127.0.0.1:9997"),
+		WebRTCPublicBaseURL: strings.TrimRight(os.Getenv("VDO_WEBRTC_PUBLIC_BASE_URL"), "/"),
+		SRTPublicHost:       os.Getenv("VDO_SRT_PUBLIC_HOST"),
+		PublicOrigin:        strings.TrimRight(os.Getenv("VDO_PUBLIC_ORIGIN"), "/"),
+		MaxActiveStreams:    maxStreams,
 	}
 }
 

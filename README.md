@@ -1,310 +1,199 @@
 # VDO Relay
 
-VDO Relay adalah private camera relay untuk Android Chrome dan desktop Chrome.
-Browser melakukan capture langsung dari kamera dan encode H.264/H.265 pada
-orientasi, resolusi, dan FPS exact yang dikunci per job. MediaMTX
-menerima hasil encode tersebut lalu menyediakan output SRT untuk OBS tanpa
-server-side transcoding.
+VDO Relay adalah relay kamera untuk Android Chrome dan desktop Chrome.
+Browser membuka kamera dan mikrofon, memilih mode kamera exact, lalu mengirim
+track native melalui WHIP/WebRTC ke MediaMTX. MediaMTX tidak melakukan
+transcoding; hasilnya dibaca OBS melalui SRT.
 
-## Setup otomatis Ubuntu
+```text
+Chrome camera + microphone
+        │  WebRTC / WHIP
+        ▼
+MediaMTX  ───────────────► SRT read URL ─► OBS
+        │
+        └── fMP4 recording (optional, tanpa re-encode)
+```
 
-Rekomendasi nama repository GitHub: `vdo-relay`.
+WHIP dipakai karena browser sudah menangani codec negotiation, congestion
+control, dan ICE. Client kecil di frontend melakukan retry session jika
+koneksi WHIP putus. Project ini tidak memakai MoQ, WebTransport, WebCodecs,
+canvas, atau framing media custom.
 
-Setelah repository di-clone ke server Ubuntu:
+## Setup Ubuntu
+
+Nama repository yang disarankan: `vdo-relay`.
 
 ```bash
 git clone https://github.com/USERNAME/vdo-relay.git
 cd vdo-relay
+chmod +x setup.sh update.sh
 ./setup.sh
 ```
 
-Jika GitHub tidak mempertahankan executable bit saat repository dipush, jalankan
-sekali `chmod +x setup.sh update.sh`. Sebelum push, gunakan
-`git update-index --chmod=+x setup.sh update.sh` supaya clone berikutnya bisa
-langsung memakai kedua script.
+`setup.sh` akan menanyakan domain web, domain media, IP publik, dan izin
+instalasi. Script lalu memasang Docker Engine, Docker Compose plugin, Nginx,
+dan Certbot; membuat `.env`; membuat vhost Nginx; menampilkan instruksi DNS;
+menunggu konfirmasi; meminta certificate; membuild image; dan menjalankan:
 
-Script akan menanyakan:
-
-- domain web/app;
-- domain media/SRT;
-- IP publik server untuk instruksi DNS;
-- izin memasang paket yang belum tersedia.
-
-Kemudian script secara berurutan akan:
-
-1. memasang Docker Engine jika belum ada;
-2. memasang Docker Compose plugin setelah Docker Engine siap;
-3. menjalankan operasi container dengan command `docker compose`;
-4. memasang Nginx, Certbot, dan plugin Certbot Nginx;
-5. membuat `.env` dan vhost Nginx dari domain yang dipilih;
-6. menampilkan record DNS yang harus dibuat dan menunggu konfirmasi;
-7. mengecek kedua record `A` sebelum memanggil Certbot;
-8. meminta certificate dengan email otomatis `admin@<domain-media>`;
-9. menyalin certificate ke MediaMTX dan memasang renewal hook;
-10. menjalankan `docker compose up -d --build`;
-11. mengecek health app dan respons TLS/HTTP MediaMTX.
-
-DNS harus dibuat seperti ini, keduanya menuju IP server yang sama:
-
-```text
-A app.example.com    -> IP_SERVER
-A media.example.com  -> IP_SERVER
+```bash
+docker compose up -d --build
 ```
 
-Jika hostname memiliki `AAAA`, IPv6 juga harus menuju server yang sama atau
-record tersebut perlu dihapus sementara; Let's Encrypt dapat memilih IPv6 saat
-melakukan validasi.
+Domain tidak harus bernama `app.example.com`. Gunakan dua hostname berbeda,
+misalnya:
 
-Script menunggu propagasi DNS. Ada pilihan `CONTINUE` untuk kondisi khusus
-seperti NAT atau load balancer, tetapi issuance Certbot tetap dapat gagal jika
-domain belum benar-benar mencapai server.
+```text
+A example.com       -> IP_SERVER
+A media.example.com -> IP_SERVER
+```
 
-Script bisa dijalankan sebagai `root` atau sebagai user biasa yang memiliki
-akses `sudo`. Jika sudah login sebagai `root`, langsung jalankan
-`./setup.sh`; tidak perlu menambahkan `sudo`. Setelah setup selesai, logout/login
-sekali jika script memberi catatan membership group Docker belum aktif.
+`VDO_PUBLIC_ORIGIN` dan `VDO_WEBRTC_PUBLIC_BASE_URL` disimpan di `.env`.
+`VDO_WEBRTC_PUBLIC_BASE_URL` harus berupa URL HTTPS tanpa port publik, karena
+Nginx meneruskan WHIP/WHEP ke MediaMTX lokal pada port 8889.
 
-## Update deployment
+Certbot memakai email `admin@<domain-media>`. Jangan menekan Enter sebelum DNS
+A kedua hostname sudah mengarah ke server; script melakukan pengecekan ulang.
 
-Untuk deployment yang sudah pernah menjalankan setup:
+## Update
 
 ```bash
 ./update.sh
 ```
 
-`update.sh` melakukan `git pull --ff-only`, memeriksa key baru pada
-`.env.example`, lalu menjalankan `docker compose up -d --build`. Key environment
-yang sudah ada tidak diubah. Jika rilis menambahkan key baru, script akan
-memintanya secara interaktif. Perubahan source yang belum di-commit akan
-menghentikan update agar tidak tertimpa; file ignored seperti `.env`, `data/`,
-certificate, `node_modules`, dan `dist` tidak menghalangi pull.
-
-## Domain dan arsitektur jaringan
-
-Gunakan dua hostname. Nama `app.example.com` dan `media.example.com` di bawah
-hanya contoh; hostname web tidak harus memakai prefix `app`. `api.example.com`
-tidak diperlukan karena frontend dan API disajikan Go pada origin yang sama.
-
-```text
-app.example.com    -> Nginx :443 -> Go + Svelte :8443
-media.example.com  -> MediaMTX :8892 TCP/UDP dan :8890 UDP
-```
-
-Nginx hanya menangani web dan HTTP-01 challenge Certbot. Nginx tidak mem-proxy
-SRT atau WebTransport. Hostname `media` harus DNS-only jika memakai provider
-proxy HTTP yang tidak meneruskan UDP.
-
-Port publik:
-
-```text
-80/tcp, 443/tcp    Nginx dan HTTPS app
-8892/tcp, 8892/udp Media-over-QUIC/WebTransport
-8890/udp           SRT read untuk OBS
-```
-
-Domain memang disimpan di `.env` dan boleh diganti dengan menjalankan ulang
-`./setup.sh`. Nilai yang ditulis script:
-
-```env
-VDO_PUBLIC_ORIGIN=https://app.example.com
-VDO_MOQ_PUBLIC_BASE_URL=https://media.example.com:8892
-VDO_SRT_PUBLIC_HOST=media.example.com
-```
-
-Jangan menaruh dua domain dalam satu variable. `.env` tidak di-commit.
-Script membuat backup `.env` lama sebelum memperbarui tiga variable tersebut.
-MediaMTX menerima CORS MoQ dari origin mana pun (`moqAllowOrigins: ["*"]`),
-sehingga alias domain web juga dapat mengambil fingerprint. Publish/read tetap
-dilindungi token; wildcard CORS tidak membuat stream menjadi anonim.
-
-## Nginx, TLS, dan renewal
-
-Template awal ada di
-[`deploy/nginx/vdo-relay.conf`](deploy/nginx/vdo-relay.conf). Template sengaja
-hanya mendengarkan port 80. Certbot menambahkan server block HTTPS sendiri.
-
-Certificate lineage `vdo-relay` yang sama dipakai Nginx dan MediaMTX WebTransport. Renewal hook
-[`deploy/certbot/vdo-relay-deploy-hook.sh`](deploy/certbot/vdo-relay-deploy-hook.sh)
-menyalin certificate baru ke `certs/` lalu me-restart service VDO melalui
-`docker compose`. Hook yang dipasang oleh `setup.sh` mengikuti lokasi clone,
-jadi project tidak wajib berada di `/opt/vdo`.
-
-Uji renewal setelah setup:
+Script memastikan perubahan source sudah bersih, menjalankan `git pull
+--ff-only`, menambahkan key `.env` baru bila ada, lalu membangun ulang:
 
 ```bash
-sudo certbot renew --dry-run
-```
-
-Jangan menghapus rule firewall/security group berikut:
-
-```bash
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 8892/tcp
-sudo ufw allow 8892/udp
-sudo ufw allow 8890/udp
-```
-
-Setup tidak mengubah UFW secara otomatis untuk menghindari mengunci akses SSH.
-
-## Penggunaan
-
-1. Buka `https://app.example.com` dan login dengan `admin` / `admin`.
-2. Ganti password saat diminta.
-3. Buka form stream baru. Browser membaca daftar kamera, microphone, dan codec.
-4. Pilih orientasi, kamera, H.264/H.265, codec audio, resolusi/FPS kamera,
-   bitrate maksimum, dan recording.
-5. Tekan **Create stream**. Browser menguji kombinasi kamera exact dan encoder
-   sebelum job dibuat. Mode yang tidak terbukti tidak muncul sebagai pilihan.
-6. Setelah job dibuat, halaman kontrol berada dalam keadaan standby. Tekan
-   **Start** untuk membuka kamera/mikrofon dan memulai relay.
-7. Profile resolusi/FPS tidak diubah dari halaman live. Buat job lain jika mode
-   berbeda diperlukan; job dan URL OBS lama tetap reusable.
-8. Gunakan **Kembali ke Home** untuk menutup halaman live; relay dihentikan,
-   tetapi job dan URL OBS tetap tersimpan.
-9. Job stopped maupun live dapat dibuka kembali dari dashboard kapan saja.
-10. Gunakan **Delete** di dashboard hanya ketika job dan token OBS memang ingin
-    dihapus permanen.
-
-Label codec pada setup adalah hasil probe encoder browser. Probe meminta
-`hardwareAcceleration: "prefer-hardware"`, tetapi browser hanya menjadikannya
-hint dan tidak menyediakan bukti universal bahwa hardware encoder benar-benar
-dipakai. Resolusi/FPS yang dipilih adalah mode kamera sekaligus ukuran encoder.
-Setiap kombinasi diuji dengan constraint exact dan `resizeMode: none`; source
-dibuka tanpa canvas, scaling, pacing, atau rotate pixel.
-
-Pada mobile, halaman live menjadi satu viewfinder full-screen tanpa scroll dengan
-bottom navigation seperti aplikasi kamera. Preview memakai source kamera aktual;
-source landscape diputar melalui CSS agar sisi kanannya berada di atas, sedangkan
-source portrait tetap portrait. Transform itu hanya untuk preview dan tidak masuk
-ke output OBS. Tidak ada tombol rotate, framing, atau gyro auto-rotate.
-
-Halaman Result menyediakan:
-
-- player live bawaan MediaMTX;
-- SRT URL lengkap dengan read token;
-- langkah konfigurasi OBS;
-- link player terpisah;
-- kode HTML `<iframe>` untuk embed.
-
-Player memakai halaman browser bawaan MediaMTX melalui MoQ. Browser yang
-membuka player harus mendukung decoder codec yang dipakai; H.264 paling aman
-untuk kompatibilitas umum.
-
-### OBS
-
-Di OBS:
-
-1. Tambahkan **Media Source**.
-2. Matikan **Local File**.
-3. Tempel SRT URL dari halaman Result.
-4. Gunakan input format `mpegts`.
-
-SRT URL berbentuk:
-
-```text
-srt://media.example.com:8890?streamid=read:<path>:user:<token>&latency=2000000&pkt_size=1316
-```
-
-Token read tersedia kembali bagi operator yang login dan tetap sama ketika relay
-di-Stop/Start atau halaman ditutup. Token dicabut saat **Delete**. Jangan
-membagikan URL tersebut sembarangan.
-
-### Health check
-
-App menyediakan:
-
-```text
-https://app.example.com/healthz
-```
-
-Setup memanggil endpoint tersebut. Untuk domain media, setup memeriksa
-`https://media.example.com:8892/`; semua respons HTTP 2xx–4xx berarti listener
-TLS/HTTP MediaMTX merespons. SRT tetap perlu diuji dari OBS karena SRT memakai
-UDP dan bukan HTTP health endpoint.
-
-## Operasional
-
-```bash
-docker compose ps
-docker compose logs --tail=200 -f vdo
-docker compose restart vdo
 docker compose up -d --build
 ```
 
-Login awal selalu `admin` / `admin` pada database baru. Password wajib diganti
-pada login pertama. SQLite dan recording berada di host pada bind mount:
-`data/app.db`, `data/token.key`, dan `data/recordings/`. Folder `data/` di-ignore Git, sehingga
-`docker compose up -d --build` tidak menghapus database atau recording.
-Container menulis folder tersebut sebagai UID/GID `10001`; gunakan `sudo` bila
-ingin membaca atau menyalin file langsung dari host.
+File runtime `data/`, `certs/`, `tools/`, dan asset build lokal sudah di-ignore
+Git. SQLite dan recording berada di `./data`, jadi tidak hilang saat rebuild.
 
-Recording default disimpan sebagai fMP4 tanpa re-encode. Nama file memakai
-tanggal, jam, dan mikrodetik waktu segment dimulai, jadi Start/reconnect berikutnya
-tidak menimpa file lama. Retention default 24 jam.
+## Port dan Nginx
 
-## Struktur project
+| Port | Fungsi | Akses |
+| --- | --- | --- |
+| 80/tcp | ACME dan redirect Certbot | publik |
+| 443/tcp | web dashboard, API, player | publik |
+| 8189/udp | ICE WebRTC media | publik |
+| 8890/udp | SRT output untuk OBS | publik |
+| 8443/tcp | Go app upstream | loopback host |
+| 8889/tcp | WHIP/WHEP MediaMTX upstream | loopback host |
+
+Nginx hanya menangani HTTP/HTTPS. UDP 8189 diperlukan WebRTC dan UDP 8890
+diperlukan OBS, sehingga keduanya tidak bisa digantikan oleh proxy HTTP Nginx.
+Control API, metrics, playback, dan callback auth hanya bind loopback di
+container.
+
+Template Nginx sengaja hanya berisi port 80. Certbot menambahkan blok HTTPS
+sendiri dan setup menyalin certificate yang sama ke `certs/` untuk MediaMTX.
+
+## Alur penggunaan
+
+1. Login dengan `admin/admin` pada instalasi baru, lalu ganti password.
+2. Pilih orientasi yang ingin diminta ke kamera.
+3. Tekan Deteksi. Browser meminta izin kamera dan mikrofon.
+4. Pilih kamera. Resolusi/FPS hanya menampilkan kombinasi yang berhasil diuji
+   dengan constraint `exact`.
+5. Pilih codec WebRTC yang tersedia, audio Opus, bitrate maksimum, dan record.
+6. Tekan `Create stream`. Ini hanya membuat job dan URL; kamera belum live.
+7. Di halaman job, tekan `Start`. Kamera dibuka ulang, diuji lagi, lalu WHIP
+   dimulai.
+8. Copy SRT URL ke OBS. URL dan token tetap sama ketika job di-stop lalu dibuka
+   kembali dari dashboard.
+
+`Stop` menghentikan sesi media tetapi tidak menghapus job. `Delete` menghapus
+job dan mencabut token. Satu job dibatasi satu pembaca SRT.
+
+## Kamera, codec, dan orientasi
+
+Resolusi/FPS yang dipilih adalah mode capture kamera dan juga ukuran final track
+yang dikirim. Tidak ada upscale, canvas, rotate, atau black bar yang masuk ke
+file. Black bar desktop hanya bagian kotak preview.
+
+Pada mobile, preview mengikuti bentuk aplikasi kamera: stage tetap memenuhi
+layar dan track landscape diputar dengan CSS hanya untuk tampilan. Transform
+CSS itu tidak mengubah media yang dikirim. Tombol Start/Stop, mute, Settings,
+sumber kamera, zoom, dan torch berada di kontrol live.
+
+Deteksi codec menggunakan daftar codec yang tersedia di WebRTC browser. Browser
+tidak menyediakan API yang dapat membuktikan bahwa codec pasti memakai hardware
+encoder; `RTCRtpSender` capability bukan bukti hardware-only. Jika hardware
+encoder wajib dijamin, diperlukan aplikasi native Android dengan Camera2 dan
+MediaCodec. Untuk output SRT v1, hanya H.264 dan H.265 yang dapat dipilih.
+VP8/VP9/AV1 boleh terlihat pada capability browser, tetapi tidak dipakai untuk
+job SRT ini. H.265 di Chrome memiliki batasan dukungan perangkat/browser.
+
+Audio browser memakai Opus melalui WebRTC. MediaMTX merelay track tanpa
+transcoding menuju SRT.
+
+## URL OBS dan player
+
+Response private `GET /api/streams/:id` mengembalikan WHIP URL, token publish,
+SRT URL, dan player URL. Bentuk SRT:
 
 ```text
-setup.sh                             setup deployment Ubuntu satu perintah
-update.sh                            pull aman dan rebuild deployment
-frontend/src/App.svelte              flow dan state halaman
-frontend/src/components/             Login, Setup, Live, Result, Dashboard
-frontend/src/lib/media.ts            kamera direct, preflight, WebCodecs, bitrate adaptif
-internal/app/                        Go API, auth, SQLite, MediaMTX control
-deploy/nginx/                        vhost HTTP awal untuk Certbot
-deploy/certbot/                      renewal hook certificate
-compose.yaml                         container dan port MediaMTX
-data/                                SQLite dan recording (bind mount, ignored)
+srt://media.example.com:8890?streamid=read:vdo-STREAM:user:READ_TOKEN&latency=2000000&pkt_size=1316
 ```
 
-## Push ke GitHub
+Di OBS gunakan `Media Source`, matikan `Local File`, masukkan URL tersebut, dan
+gunakan format `mpegts` dengan latency sekitar dua detik.
 
-Jalankan dari folder project setelah memastikan `.env`, `data/`, dan
-certificate tidak masuk staging:
+Player memakai route `/player` milik VDO Relay dan WHEP dengan header Bearer,
+bukan halaman iframe bawaan MediaMTX. Dengan begitu token tetap bisa dipakai
+lintas-origin tanpa endpoint fingerprint; request CORS WHEP ditangani sebagai
+bagian dari handshake WebRTC. Link embed dapat disalin dari halaman Result.
 
-```bash
-git init
-git add .
-git update-index --chmod=+x setup.sh
-git status
-git commit -m "Initial VDO Relay"
-git branch -M main
-git remote add origin git@github.com:USERNAME/vdo-relay.git
-git push -u origin main
+## Environment
+
+```dotenv
+VDO_PUBLIC_ORIGIN=https://example.com
+VDO_WEBRTC_PUBLIC_BASE_URL=https://media.example.com
+VDO_SRT_PUBLIC_HOST=media.example.com
 ```
 
-`.gitignore` mengecualikan `.env`, database, recording, certificate,
-`node_modules`, dan hasil build.
+`VDO_DATA_DIR` default `/data` di container. `VDO_MEDIAMTX_BIN`, certificate,
+alamat listener, dan Control API memiliki default untuk deployment Compose.
 
-## Development dan validasi
+## Pengembangan lokal
 
 Frontend:
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run check
 npm run build
+npm run test:flow
 ```
 
-Backend dan script:
+Backend:
 
 ```bash
-cd ..
 go test ./...
-go vet ./...
-bash -n setup.sh
 ```
 
-Dokumentasi detail ada di [docs/PRD.md](docs/PRD.md) dan
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Untuk uji browser lokal, gunakan HTTPS yang dipercaya browser untuk app dan
+MediaMTX. Kamera, mikrofon, WHIP, dan WHEP tidak dapat diuji lengkap dari
+halaman HTTP biasa selain pengecualian localhost tertentu.
 
-## Referensi resmi
+## Struktur utama
 
-- [Docker Engine di Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
-- [Docker Compose plugin di Linux](https://docs.docker.com/compose/install/linux/)
-- [Certbot Nginx](https://eff-certbot.readthedocs.io/en/stable/man/certbot.html)
-- [MediaMTX browser read/embed](https://mediamtx.org/docs/read/web-browsers)
-- [MediaMTX MoQ publishing](https://mediamtx.org/docs/publish/moq-clients)
-- [MediaMTX SRT read](https://mediamtx.org/docs/read/srt)
+```text
+cmd/vdo/                         entrypoint Go
+internal/app/                    API, SQLite, auth, lifecycle MediaMTX
+frontend/src/App.svelte          routing dashboard/setup/live/result/player
+frontend/src/lib/media.ts        capability dan exact camera capture
+frontend/src/lib/mediamtx-webrtc-publisher.js  WHIP publisher
+frontend/src/lib/mediamtx-webrtc-reader.js     WHEP player
+deploy/nginx/vdo-relay.conf      vhost port 80 sebelum Certbot
+deploy/certbot/                  renewal hook
+compose.yaml                     deployment single-container
+setup.sh                         instalasi awal Ubuntu
+update.sh                        pull dan rebuild
+```
+
+## Lisensi
+
+MediaMTX dipin pada versi `v1.20.1`. Lihat lisensi masing-masing dependency.

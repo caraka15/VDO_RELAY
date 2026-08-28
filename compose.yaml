@@ -10,12 +10,14 @@ services:
     ports:
       # Nginx owns public 80/443. The Go app stays reachable only from localhost.
       - "127.0.0.1:8443:8443/tcp"
-      - "8892:8892/tcp"
-      - "8892:8892/udp"
+      # Nginx proxies the WHIP/WHEP HTTP handshake to this loopback port.
+      - "127.0.0.1:8889:8889/tcp"
+      # ICE media is UDP and cannot be proxied by the HTTP Nginx vhost.
+      - "8189:8189/udp"
       - "8890:8890/udp"
     environment:
       VDO_PUBLIC_ORIGIN: ${VDO_PUBLIC_ORIGIN:?set VDO_PUBLIC_ORIGIN in .env}
-      VDO_MOQ_PUBLIC_BASE_URL: ${VDO_MOQ_PUBLIC_BASE_URL:?set VDO_MOQ_PUBLIC_BASE_URL in .env}
+      VDO_WEBRTC_PUBLIC_BASE_URL: ${VDO_WEBRTC_PUBLIC_BASE_URL:?set VDO_WEBRTC_PUBLIC_BASE_URL in .env}
       VDO_SRT_PUBLIC_HOST: ${VDO_SRT_PUBLIC_HOST:?set VDO_SRT_PUBLIC_HOST in .env}
     volumes:
       # SQLite dan recording sengaja berada di host agar rebuild tidak menghapusnya.

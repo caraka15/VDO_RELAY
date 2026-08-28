@@ -29,8 +29,7 @@
     probeCameraDevices,
     probeAudioCodecs,
     probeVideoCodecs,
-    startAdaptiveBitrate,
-    startMoqPublisher,
+    startWhipPublisher,
     type AudioCapability,
     type CameraDevice,
     type CaptureSession,
@@ -41,10 +40,11 @@
   import LiveView from "./components/LiveView.svelte";
   import LoginView from "./components/LoginView.svelte";
   import PasswordView from "./components/PasswordView.svelte";
+  import PlayerView from "./components/PlayerView.svelte";
   import ResultView from "./components/ResultView.svelte";
   import SetupView from "./components/SetupView.svelte";
 
-  type Page = "login" | "password" | "dashboard" | "setup" | "live" | "result";
+  type Page = "login" | "password" | "dashboard" | "setup" | "live" | "result" | "player";
   type PreparedStreamInput = StartStreamInput & { deviceId?: string; audioDeviceId?: string };
   type PublisherStatus = "ready" | "connecting" | "live" | "error";
   type VerifiedProfile = Pick<CaptureSession, "actualWidth" | "actualHeight" | "actualFps">;
@@ -79,12 +79,10 @@
   let preparedInput: PreparedStreamInput | null = null;
   let captureSession: CaptureSession | null = null;
   let publisher: Publisher | null = null;
-  let stopAdaptive: (() => void) | null = null;
   let statsTimer: number | null = null;
   let liveStats: StreamStats | null = null;
   let publisherStatus: PublisherStatus = "ready";
   let publisherError = "";
-  let targetBitrateKbps = 0;
   let copied = false;
   let verifiedProfile: VerifiedProfile | null = null;
 
@@ -94,6 +92,11 @@
   });
 
   async function bootstrap() {
+    if (window.location.pathname === "/player") {
+      page = "player";
+      booting = false;
+      return;
+    }
     try {
       const current = await getSession();
       if (!current.authenticated) {
@@ -225,10 +228,10 @@
     createBusy = true;
     setupError = "";
     try {
-      const outputProbe = await probeVideoCodecs(input.width, input.height, input.fps);
+      const outputProbe = await probeVideoCodecs();
       const outputCapability = outputProbe.find((item) => item.key === input.codec && item.supported && item.srtCompatible);
       if (!outputCapability) {
-        throw new Error(`Encoder ${input.codec.toUpperCase()} tidak mendukung output ${input.width} x ${input.height} pada ${input.fps} FPS. Pilih profile atau codec lain.`);
+        throw new Error(`Codec ${input.codec.toUpperCase()} tidak tersedia untuk WHIP di browser ini. Pilih codec lain.`);
       }
       if (input.audioEnabled && !audioCodecs.some((item) => item.key === input.audioCodec && item.supported)) {
         throw new Error(`Encoder audio ${input.audioCodec.toUpperCase()} tidak tersedia di browser.`);
@@ -238,7 +241,6 @@
       preparedInput = input;
       captureSession = null;
       verifiedProfile = null;
-      targetBitrateKbps = input.maxBitrateKbps;
       publisherStatus = "ready";
       publisherError = "";
       liveStats = null;
@@ -252,10 +254,10 @@
   }
 
   async function openValidatedCapture(input: PreparedStreamInput) {
-    const finalProbe = await probeVideoCodecs(input.width, input.height, input.fps);
+    const finalProbe = await probeVideoCodecs();
     const capability = finalProbe.find((item) => item.key === input.codec && item.supported && item.srtCompatible);
     if (!capability) {
-      throw new Error(`Encoder ${input.codec.toUpperCase()} tidak mendukung ${input.width}×${input.height} pada ${input.fps} FPS. Pilih profile lebih rendah.`);
+      throw new Error(`Codec ${input.codec.toUpperCase()} tidak tersedia untuk WHIP di browser ini. Pilih codec lain.`);
     }
     if (input.audioEnabled && !audioCodecs.some((item) => item.key === input.audioCodec && item.supported)) {
       throw new Error(`Encoder audio ${input.audioCodec.toUpperCase()} tidak tersedia di browser.`);
@@ -268,7 +270,7 @@
     try {
       if (codecs.length === 0 || audioCodecs.length === 0) await loadCapabilities();
       const stream = await getStream(summary.id);
-      if (!stream.publishUrl || !stream.publishToken || !stream.srtUrl) {
+      if (!stream.whipUrl || !stream.publishToken || !stream.srtUrl) {
         throw new Error("URL job tidak tersedia. Hapus job ini lalu buat job baru.");
       }
       cleanupLive();
@@ -284,7 +286,6 @@
         audioEnabled: stream.audioEnabled,
         record: stream.record,
       };
-      targetBitrateKbps = stream.maxBitrateKbps;
       publisherStatus = "ready";
       publisherError = "";
       verifiedProfile = null;
@@ -305,7 +306,7 @@
     let capture: CaptureSession | null = null;
     let startedPublisher: Publisher | null = null;
     try {
-      if (!stream.publishUrl || !stream.publishToken) {
+      if (!stream.whipUrl || !stream.publishToken) {
         throw new Error("Job stream tidak memiliki URL atau token publish. Buka ulang job dari dashboard.");
       }
       const validated = await openValidatedCapture(input);
@@ -325,9 +326,8 @@
       verifiedProfile = { actualWidth: capture.actualWidth, actualHeight: capture.actualHeight, actualFps: capture.actualFps };
       captureSession = capture;
       const selectedAudio = audioCodecs.find((item) => item.key === streamInput.audioCodec && item.supported);
-      startedPublisher = await startMoqPublisher({
-        publishUrl: updatedStream.publishUrl!,
-        fingerprintUrl: updatedStream.fingerprintUrl || `${updatedStream.publishUrl}/fingerprint`,
+      startedPublisher = await startWhipPublisher({
+        whipUrl: updatedStream.whipUrl!,
         publishToken: updatedStream.publishToken!,
         capture,
         codec: validated.capability,
@@ -351,13 +351,6 @@
         return;
       }
       publisher = startedPublisher;
-      stopAdaptive = startAdaptiveBitrate(publisher, input.maxBitrateKbps, {
-        onTarget: (target) => (targetBitrateKbps = target),
-        onFailure: () => {
-          publisherStatus = "error";
-          publisherError = "Transport tetap tertekan pada technical floor. Stop lalu cek jaringan atau profile.";
-        },
-      });
       startStatsPolling();
     } catch (error) {
       startedPublisher?.close();
@@ -403,8 +396,6 @@
   function stopLocalRelay() {
     if (statsTimer !== null) window.clearInterval(statsTimer);
     statsTimer = null;
-    stopAdaptive?.();
-    stopAdaptive = null;
     publisher?.close();
     publisher = null;
     if (captureSession) {
@@ -416,7 +407,6 @@
     liveStats = null;
     publisherStatus = "ready";
     publisherError = "";
-    targetBitrateKbps = preparedInput?.maxBitrateKbps || 0;
     publishBusy = false;
   }
 
@@ -515,6 +505,8 @@
   <main class="flex min-h-dvh items-center justify-center px-5">
     <div class="flex items-center gap-3 text-sm font-bold text-[var(--muted)]" aria-live="polite"><LoaderCircle size={19} class="animate-spin text-[var(--accent)]" /> Memuat VDO Relay...</div>
   </main>
+{:else if page === "player"}
+  <PlayerView />
 {:else if !session}
   <LoginView busy={loginBusy} error={loginError} onSubmit={handleLogin} />
 {:else if page === "password"}
@@ -522,9 +514,9 @@
 {:else if page === "setup"}
   <SetupView codecs={codecs} audioCodecs={audioCodecs} devices={cameraDevices} {microphoneDevices} {microphonePermission} {microphoneChecking} {microphoneError} bind:selectedCodec detecting={detecting} creating={createBusy} error={setupError} onDetect={detectDevices} onCheckMicrophone={checkMicrophoneInput} onCreate={handleCreate} onBack={showDashboard} />
 {:else if page === "result" && liveStream}
-  <ResultView stream={liveStream} stats={liveStats} {publisherStatus} {targetBitrateKbps} onBack={() => (page = "live")} onStop={stopRelay} />
+  <ResultView stream={liveStream} stats={liveStats} {publisherStatus} onBack={() => (page = "live")} onStop={stopRelay} />
 {:else if page === "live" && liveStream}
-  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} {cameraDevices} {microphoneDevices} deviceId={preparedInput?.deviceId || ""} audioDeviceId={preparedInput?.audioDeviceId || ""} stats={liveStats} {publisherStatus} {publisherError} {targetBitrateKbps} {copied} starting={publishBusy} onStart={handlePublishStart} onSource={setSource} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onLeaveHome={leaveLive} />
+  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} {cameraDevices} {microphoneDevices} deviceId={preparedInput?.deviceId || ""} audioDeviceId={preparedInput?.audioDeviceId || ""} stats={liveStats} {publisherStatus} {publisherError} {copied} starting={publishBusy} onStart={handlePublishStart} onSource={setSource} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onLeaveHome={leaveLive} />
 {:else}
   <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onOpenStream={handleOpenStream} onDeleteStream={handleDeleteStream} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
 {/if}

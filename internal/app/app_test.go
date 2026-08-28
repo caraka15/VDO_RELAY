@@ -40,14 +40,11 @@ func TestStreamTokenHash(t *testing.T) {
 }
 
 func TestMediaPlayerURL(t *testing.T) {
-	player := moqPlayerURL("https://media.example.com:8892", "vdo-stream", "read-secret")
+	player := appPlayerURL("https://app.example.com", "", "https://media.example.com/vdo-stream/whep", "read-secret")
 	for _, expected := range []string{
-		"https://media.example.com:8892/vdo-stream",
+		"https://app.example.com/player",
+		"url=https%3A%2F%2Fmedia.example.com%2Fvdo-stream%2Fwhep",
 		"token=read-secret",
-		"autoplay=true",
-		"muted=true",
-		"controls=true",
-		"playsInline=true",
 	} {
 		if !strings.Contains(player, expected) {
 			t.Fatalf("player URL missing %q: %s", expected, player)
@@ -55,13 +52,38 @@ func TestMediaPlayerURL(t *testing.T) {
 	}
 }
 
+func TestStreamResponseUsesWhipAndWhepPlayer(t *testing.T) {
+	application := &App{cfg: Config{
+		PublicOrigin:        "https://example.com",
+		WebRTCPublicBaseURL: "https://media.example.com",
+		SRTPublicHost:       "media.example.com",
+	}}
+	request := httptest.NewRequest(http.MethodGet, "https://example.com/api/streams/stream-1", nil)
+	response := application.responseForStream(streamRecord{ID: "stream-1", Path: "vdo-stream", Status: "ready", Codec: "h264", AudioCodec: "opus", Width: 1280, Height: 720, FPS: 30, MaxBitrateKbps: 4000, CurrentBitrateKbps: 4000}, request, "publish-secret", "read-secret")
+	if response.WhipURL != "https://media.example.com/vdo-stream/whip" {
+		t.Fatalf("unexpected WHIP URL: %s", response.WhipURL)
+	}
+	if !strings.Contains(response.PlayerURL, "https://example.com/player?") || !strings.Contains(response.PlayerURL, "token=read-secret") {
+		t.Fatalf("unexpected player URL: %s", response.PlayerURL)
+	}
+	if strings.Contains(response.WhipURL, "8892") || strings.Contains(response.PlayerURL, "fingerprint") {
+		t.Fatal("response still contains the old MoQ/fingerprint flow")
+	}
+}
+
 func TestMediaOriginsAllowBrowserAliases(t *testing.T) {
 	config := newMediaManager(Config{
-		PublicOrigin:     "https://app.example.com",
-		MoQPublicBaseURL: "https://media.example.com:8892",
+		PublicOrigin:        "https://app.example.com",
+		WebRTCPublicBaseURL: "https://media.example.com",
 	}).configText()
-	if !strings.Contains(config, `moqAllowOrigins: ["*"]`) {
-		t.Fatal("MoQ must accept browser aliases; media authentication still protects each path")
+	if !strings.Contains(config, `webrtcAllowOrigins: ["*"]`) {
+		t.Fatal("WebRTC must accept browser aliases; media authentication still protects each path")
+	}
+	if !strings.Contains(config, "moq: false") {
+		t.Fatal("MoQ must be explicitly disabled because MediaMTX enables it by default")
+	}
+	if !strings.Contains(config, "webrtcAddress: :8889") || !strings.Contains(config, "webrtcLocalUDPAddress: :8189") {
+		t.Fatal("WebRTC handshake and ICE listeners are not configured")
 	}
 }
 
@@ -380,7 +402,7 @@ func TestMediaAuthAcceptsMediaMTXPayload(t *testing.T) {
 	}
 	body, err := json.Marshal(map[string]any{
 		"user": "", "password": "", "token": secret, "action": "publish", "path": pathName,
-		"protocol": "moq", "query": "", "ip": "127.0.0.1", "id": "connection-id", "userAgent": "Chrome",
+		"protocol": "webrtc", "query": "", "ip": "127.0.0.1", "id": "connection-id", "userAgent": "Chrome",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -393,7 +415,7 @@ func TestMediaAuthAcceptsMediaMTXPayload(t *testing.T) {
 		t.Fatalf("valid MediaMTX auth status = %d", recorder.Code)
 	}
 
-	request = httptest.NewRequest(http.MethodPost, "/internal/media-auth", strings.NewReader(`{"action":"publish","path":"vdo-auth-test","protocol":"moq","token":"wrong"}`))
+	request = httptest.NewRequest(http.MethodPost, "/internal/media-auth", strings.NewReader(`{"action":"publish","path":"vdo-auth-test","protocol":"webrtc","token":"wrong"}`))
 	request.RemoteAddr = "127.0.0.1:9999"
 	recorder = httptest.NewRecorder()
 	application.internalHandler.ServeHTTP(recorder, request)

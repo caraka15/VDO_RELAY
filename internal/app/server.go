@@ -27,9 +27,13 @@ func (a *App) withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src https:; connect-src 'self' https:")
+		if r.URL.Path == "/player" {
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors *; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' https:; frame-src 'self' https:; connect-src 'self' https:")
+		} else {
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' https:; frame-src 'self' https:; connect-src 'self' https:")
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/healthz" {
 			w.Header().Set("Cache-Control", "no-store")
 		}
@@ -215,8 +219,8 @@ func (input createStreamRequest) validate() error {
 	if input.AudioCodec == "" {
 		input.AudioCodec = "opus"
 	}
-	if input.AudioCodec != "aac" && input.AudioCodec != "opus" {
-		return errors.New("audioCodec must be aac or opus")
+	if input.AudioCodec != "opus" {
+		return errors.New("audioCodec must be opus for browser WebRTC")
 	}
 	validSize := (input.Width == 1920 && input.Height == 1080) || (input.Width == 1080 && input.Height == 1920) ||
 		(input.Width == 1280 && input.Height == 720) || (input.Width == 720 && input.Height == 1280) ||
@@ -248,8 +252,7 @@ type streamResponse struct {
 	AudioEnabled       bool      `json:"audioEnabled"`
 	Record             bool      `json:"record"`
 	CreatedAt          time.Time `json:"createdAt"`
-	PublishURL         string    `json:"publishUrl,omitempty"`
-	FingerprintURL     string    `json:"fingerprintUrl,omitempty"`
+	WhipURL            string    `json:"whipUrl,omitempty"`
 	PublishToken       string    `json:"publishToken,omitempty"`
 	SRTURL             string    `json:"srtUrl,omitempty"`
 	PlayerURL          string    `json:"playerUrl,omitempty"`
@@ -329,34 +332,37 @@ func boolInt(value bool) int {
 }
 
 func (a *App) responseForStream(stream streamRecord, r *http.Request, publishToken, readToken string) streamResponse {
-	moqBase := a.cfg.MoQPublicBaseURL
-	if moqBase == "" {
-		moqBase = "https://" + hostOnly(r.Host) + ":8892"
+	webrtcBase := a.cfg.WebRTCPublicBaseURL
+	if webrtcBase == "" {
+		webrtcBase = requestScheme(r) + "://" + hostOnly(r.Host) + ":8889"
 	}
-	publishURL := strings.TrimRight(moqBase, "/") + "/" + url.PathEscape(stream.Path)
+	mediaPath := strings.TrimRight(webrtcBase, "/") + "/" + url.PathEscape(stream.Path)
+	whipURL := mediaPath + "/whip"
+	whepURL := mediaPath + "/whep"
 	srtHost := a.cfg.SRTPublicHost
 	if srtHost == "" {
 		srtHost = hostOnly(r.Host)
 	}
 	srtURL := "srt://" + srtHost + ":8890?streamid=read:" + stream.Path + ":user:" + readToken + "&latency=2000000&pkt_size=1316"
-	playerURL := moqPlayerURL(moqBase, stream.Path, readToken)
-	return streamResponse{ID: stream.ID, Path: stream.Path, Status: stream.Status, Codec: stream.Codec, AudioCodec: stream.AudioCodec, Width: stream.Width, Height: stream.Height, FPS: stream.FPS, MaxBitrateKbps: stream.MaxBitrateKbps, CurrentBitrateKbps: stream.CurrentBitrateKbps, PortraitMode: stream.PortraitMode, AudioEnabled: stream.AudioEnabled, Record: stream.Record, CreatedAt: stream.CreatedAt, PublishURL: publishURL, FingerprintURL: publishURL + "/fingerprint", PublishToken: publishToken, SRTURL: srtURL, PlayerURL: playerURL}
+	playerURL := appPlayerURL(a.cfg.PublicOrigin, requestScheme(r)+"://"+r.Host, whepURL, readToken)
+	return streamResponse{ID: stream.ID, Path: stream.Path, Status: stream.Status, Codec: stream.Codec, AudioCodec: stream.AudioCodec, Width: stream.Width, Height: stream.Height, FPS: stream.FPS, MaxBitrateKbps: stream.MaxBitrateKbps, CurrentBitrateKbps: stream.CurrentBitrateKbps, PortraitMode: stream.PortraitMode, AudioEnabled: stream.AudioEnabled, Record: stream.Record, CreatedAt: stream.CreatedAt, WhipURL: whipURL, PublishToken: publishToken, SRTURL: srtURL, PlayerURL: playerURL}
 }
 
-func moqPlayerURL(base, streamPath, readToken string) string {
-	if base == "" || streamPath == "" || readToken == "" {
+func appPlayerURL(configuredOrigin, requestOrigin, whepURL, readToken string) string {
+	origin := strings.TrimRight(configuredOrigin, "/")
+	if origin == "" {
+		origin = strings.TrimRight(requestOrigin, "/")
+	}
+	if origin == "" || whepURL == "" || readToken == "" {
 		return ""
 	}
-	parsed, err := url.Parse(strings.TrimRight(base, "/") + "/" + url.PathEscape(streamPath))
+	parsed, err := url.Parse(origin + "/player")
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return ""
 	}
 	query := parsed.Query()
+	query.Set("url", whepURL)
 	query.Set("token", readToken)
-	query.Set("autoplay", "true")
-	query.Set("muted", "true")
-	query.Set("controls", "true")
-	query.Set("playsInline", "true")
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
 }
@@ -699,7 +705,7 @@ func (a *App) handleMediaAuth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	if input.Protocol != "" && input.Protocol != "moq" && input.Protocol != "srt" {
+	if input.Protocol != "" && input.Protocol != "webrtc" && input.Protocol != "srt" {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -756,12 +762,15 @@ func sameOrigin(r *http.Request) bool {
 	if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, r.Host) {
 		return false
 	}
+	return strings.EqualFold(parsed.Scheme, requestScheme(r))
+}
+
+func requestScheme(r *http.Request) string {
 	forwardedProto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
-	expectedScheme := "http"
 	if r.TLS != nil || strings.EqualFold(forwardedProto, "https") {
-		expectedScheme = "https"
+		return "https"
 	}
-	return strings.EqualFold(parsed.Scheme, expectedScheme)
+	return "http"
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {

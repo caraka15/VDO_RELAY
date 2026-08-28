@@ -220,6 +220,7 @@ func (m *mediaManager) pathStats(ctx context.Context, path string) (mediaPathSta
 func (m *mediaManager) configText() string {
 	cert := yamlString(m.cfg.TLSCertFile)
 	key := yamlString(m.cfg.TLSKeyFile)
+	additionalHost := yamlHostList(webRTCAdditionalHost(m.cfg.WebRTCPublicBaseURL))
 	recordPath := yamlString(filepath.ToSlash(filepath.Join(m.cfg.DataDir, "recordings", "%path", "%Y-%m-%d_%H-%M-%S-%f")))
 	authURL := yamlString("http://" + m.cfg.InternalAddr + "/internal/media-auth")
 	return fmt.Sprintf(`logLevel: info
@@ -228,17 +229,19 @@ logDestinations: [stdout]
 rtsp: false
 rtmp: false
 hls: false
-webrtc: false
+moq: false
+webrtc: true
+webrtcAddress: :8889
+webrtcEncryption: true
+webrtcServerCert: %s
+webrtcServerKey: %s
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+webrtcIPsFromInterfaces: true
+webrtcAdditionalHosts: %s
 
 srt: true
 srtAddress: :8890
-
-moq: true
-moqHTTP2Address: :8892
-moqHTTP3Address: :8892
-moqServerCert: %s
-moqServerKey: %s
-moqAllowOrigins: ["*"]
 
 api: true
 apiAddress: 127.0.0.1:9997
@@ -266,7 +269,22 @@ pathDefaults:
 
 paths:
   all_others:
-`, cert, key, authURL, recordPath)
+`, cert, key, additionalHost, authURL, recordPath)
+}
+
+func webRTCAdditionalHost(base string) string {
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
+func yamlHostList(host string) string {
+	if host == "" {
+		return "[]"
+	}
+	return "[" + yamlString(host) + "]"
 }
 
 func yamlString(value string) string {

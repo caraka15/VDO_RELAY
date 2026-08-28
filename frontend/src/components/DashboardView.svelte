@@ -58,7 +58,7 @@
 
     <section class="mb-7 grid gap-4 sm:grid-cols-3" aria-label="Ringkasan server">
       <div class="panel p-5"><div class="mb-4 flex items-center justify-between"><span class="text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Open jobs</span><Activity size={18} class="text-[var(--accent)]" /></div><p class="mono text-3xl font-extrabold">{activeStreams.length}<span class="text-base text-[var(--faint)]"> / 8</span></p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">Job ready dan live</p></div>
-      <div class="panel p-5"><div class="mb-4 flex items-center justify-between"><span class="text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Transport</span><Wifi size={18} class="text-[var(--success)]" /></div><p class="text-2xl font-extrabold text-[var(--success)]">MoQ → SRT</p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">No server transcoding</p></div>
+      <div class="panel p-5"><div class="mb-4 flex items-center justify-between"><span class="text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Transport</span><Wifi size={18} class="text-[var(--success)]" /></div><p class="text-2xl font-extrabold text-[var(--success)]">WHIP → SRT</p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">No server transcoding</p></div>
       <div class="panel p-5"><div class="mb-4 flex items-center justify-between"><span class="text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Security</span><ShieldCheck size={18} class="text-[var(--warning)]" /></div><p class="text-2xl font-extrabold">Tokenized</p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">Token tetap sampai job dihapus</p></div>
     </section>
 
