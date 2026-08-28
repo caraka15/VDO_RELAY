@@ -6,7 +6,7 @@
   export let stream: Stream;
   export let stats: StreamStats | null = null;
   export let targetBitrateKbps = 0;
-  export let publisherStatus: "connecting" | "live" | "error" = "connecting";
+  export let publisherStatus: "ready" | "connecting" | "live" | "error" = "ready";
   export let onBack: () => void;
   export let onStop: () => void;
 
@@ -18,7 +18,7 @@
   $: embedCode = playerUrl
     ? `<iframe src="${playerUrl}" title="VDO Relay player" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
     : "";
-  $: statusLabel = publisherStatus === "live" ? "LIVE" : publisherStatus === "error" ? "ERROR" : "CONNECTING";
+  $: statusLabel = publisherStatus === "ready" ? "READY" : publisherStatus === "live" ? "LIVE" : publisherStatus === "error" ? "ERROR" : "CONNECTING";
 
   async function copyValue(value: string, target: CopyTarget) {
     if (!value) return;

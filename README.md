@@ -146,10 +146,16 @@ Setup tidak mengubah UFW secara otomatis untuk menghindari mengunci akses SSH.
 
 1. Buka `https://app.example.com` dan login dengan `admin` / `admin`.
 2. Ganti password saat diminta.
-3. Buat stream baru, lalu jalankan deteksi device dan preflight.
+3. Buka form stream baru; deteksi device/microphone dapat dijalankan bila perlu.
 4. Pilih H.264 atau H.265, resolusi, FPS, bitrate maksimum, audio, portrait,
    dan recording.
-5. Saat live, buka **Result**.
+5. Tekan **Create stream** untuk membuat job dan URL tanpa membuka kamera.
+6. Di halaman kontrol, atur framing lalu tekan **Start camera & relay**.
+7. Saat live, buka **Result**.
+
+Label codec pada setup adalah hasil probe encoder browser `1280x720/30`, bukan
+klaim hardware encoder atau profile kamera. Resolusi dan FPS kamera aktual baru
+diverifikasi saat Start dan ditolak bila lebih rendah atau tidak dilaporkan.
 
 Halaman Result menyediakan:
 

@@ -1,25 +1,28 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
-  import { Activity, AlertCircle, Check, CircleStop, Copy, ExternalLink, HardDrive, Radio, Wifi } from "@lucide/svelte";
+  import { afterUpdate, onDestroy } from "svelte";
+  import { Activity, AlertCircle, Camera, Check, CircleStop, Copy, ExternalLink, HardDrive, Play, Radio, Smartphone, Video, Wifi } from "@lucide/svelte";
   import type { Stream, StreamStats } from "../lib/api";
   import type { CaptureSession } from "../lib/media";
   import { formatBitrate } from "../lib/format";
 
   export let stream: Stream;
-  export let capture: CaptureSession;
+  export let capture: CaptureSession | null = null;
   export let stats: StreamStats | null = null;
-  export let publisherStatus: "connecting" | "live" | "error" = "connecting";
+  export let publisherStatus: "ready" | "connecting" | "live" | "error" = "ready";
   export let publisherError = "";
   export let targetBitrateKbps: number;
   export let copied = false;
+  export let starting = false;
+  export let onStart: () => void;
+  export let onPortraitMode: (portraitMode: boolean) => void;
   export let onCopy: () => void;
   export let onResult: () => void;
   export let onStop: () => void;
 
   let previewHost: HTMLDivElement;
 
-  onMount(() => {
-    if (capture?.canvas && previewHost) {
+  afterUpdate(() => {
+    if (capture?.canvas && previewHost && capture.canvas.parentElement !== previewHost) {
       previewHost.appendChild(capture.canvas);
     }
   });
@@ -28,8 +31,12 @@
     capture?.canvas?.remove();
   });
 
-  $: statusLabel = publisherStatus === "live" ? "LIVE" : publisherStatus === "error" ? "ERROR" : "CONNECTING";
-  $: statusColor = publisherStatus === "live" ? "var(--success)" : publisherStatus === "error" ? "var(--danger)" : "var(--warning)";
+  $: statusLabel = publisherStatus === "ready" ? "READY" : publisherStatus === "live" ? "LIVE" : publisherStatus === "error" ? "ERROR" : "CONNECTING";
+  $: statusColor = publisherStatus === "ready" ? "var(--accent)" : publisherStatus === "live" ? "var(--success)" : publisherStatus === "error" ? "var(--danger)" : "var(--warning)";
+  $: pageTitle = publisherStatus === "ready" ? "Job stream siap" : publisherStatus === "live" ? "Output sedang berjalan" : publisherStatus === "error" ? "Start belum berhasil" : "Menyiapkan output";
+  $: pageDescription = publisherStatus === "ready" || publisherStatus === "error"
+    ? "Link OBS sudah dibuat. Atur framing lalu mulai kamera dan relay."
+    : "Preview di bawah adalah frame final yang dikirim ke server.";
 </script>
 
 <svelte:head>
@@ -40,8 +47,8 @@
   <header class="mb-7 flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
     <div>
       <p class="mono mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">STREAM / {stream.id}</p>
-      <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Output sedang berjalan</h1>
-      <p class="mt-2 text-sm leading-6 text-[var(--muted)]">Preview di bawah adalah frame final yang dikirim ke server.</p>
+      <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">{pageTitle}</h1>
+      <p class="mt-2 text-sm leading-6 text-[var(--muted)]">{pageDescription}</p>
     </div>
     <div class="flex flex-wrap items-center justify-end gap-2">
       <span class="inline-flex min-h-[44px] items-center gap-2 border px-3 text-sm font-extrabold" style={`border-color:${statusColor};color:${statusColor}`} aria-live="polite">
@@ -50,16 +57,13 @@
       <button class="button-secondary flex items-center gap-2" type="button" on:click={onResult}>
         <ExternalLink size={17} /><span>Result</span>
       </button>
-      <button class="button-danger flex items-center gap-2" type="button" on:click={onStop}>
-        <CircleStop size={18} /><span>Stop</span>
-      </button>
     </div>
   </header>
 
   {#if publisherError}
     <div class="mb-5 flex gap-3 border border-[#844a52] bg-[#321c22] p-4 text-sm text-[var(--danger)]" role="alert">
       <AlertCircle size={19} class="mt-0.5 shrink-0" />
-      <div><strong>Koneksi publisher bermasalah.</strong><p class="mt-1 text-[var(--danger)]">{publisherError}</p></div>
+      <div><strong>Start stream bermasalah.</strong><p class="mt-1 text-[var(--danger)]">{publisherError}</p></div>
     </div>
   {/if}
 
@@ -69,11 +73,50 @@
         <h2 id="preview-heading" class="flex min-w-0 items-center gap-2 text-sm font-extrabold"><Activity size={17} class="shrink-0 text-[var(--accent)]" /> Preview output</h2>
         <span class="mono text-right text-xs font-bold text-[var(--muted)]">{stream.width}×{stream.height} / {stream.fps} FPS</span>
       </div>
-      <div bind:this={previewHost} class="aspect-video w-full bg-black"></div>
+      <div class="relative aspect-video w-full bg-black">
+        <div bind:this={previewHost} class="h-full w-full"></div>
+        {#if !capture}
+          <div class="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+            <Camera size={30} class="mb-3 text-[var(--accent)]" aria-hidden="true" />
+            <p class="font-extrabold">Kamera belum aktif</p>
+            <p class="mt-1 max-w-sm text-sm leading-6 text-[var(--muted)]">Job dan URL sudah tersedia. Tekan Start camera &amp; relay setelah framing sesuai.</p>
+          </div>
+        {/if}
+      </div>
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border)] px-4 py-3 text-xs font-semibold text-[var(--muted)]">
-        <span class="inline-flex items-center gap-2"><span class="status-dot text-[var(--success)]"></span> Canvas final</span>
+        <span class="inline-flex items-center gap-2"><span class="status-dot" style={`color:${capture ? "var(--success)" : "var(--faint)"}`}></span>{capture ? "Canvas final aktif" : "Preview standby"}</span>
+        <span>{capture ? `Input aktual ${capture.actualWidth}×${capture.actualHeight} / ${Math.round(capture.actualFps * 10) / 10} FPS` : "Profile kamera belum diuji"}</span>
         <span>{stream.portraitMode ? "Portrait + bar hitam" : "Landscape fill"}</span>
         <span>{stream.audioEnabled ? "Audio aktif" : "Audio off"}</span>
+      </div>
+      <div class="border-t border-[var(--border)] p-4 sm:p-5">
+        <fieldset disabled={Boolean(capture) || starting} aria-describedby="framing-help">
+          <legend class="mb-2 text-sm font-extrabold">Framing output</legend>
+          <div class="grid gap-2 min-[420px]:grid-cols-2">
+            <button class="flex min-h-[52px] items-center gap-3 border px-3 text-left" class:border-[var(--accent)]={!stream.portraitMode} class:bg-[var(--surface-strong)]={!stream.portraitMode} class:border-[var(--border)]={stream.portraitMode} type="button" aria-pressed={!stream.portraitMode} on:click={() => onPortraitMode(false)}>
+              <Video size={18} class="shrink-0" /><span><strong class="block">Landscape</strong><span class="block text-xs text-[var(--muted)]">Isi frame 16:9</span></span>
+            </button>
+            <button class="flex min-h-[52px] items-center gap-3 border px-3 text-left" class:border-[var(--accent)]={stream.portraitMode} class:bg-[var(--surface-strong)]={stream.portraitMode} class:border-[var(--border)]={!stream.portraitMode} type="button" aria-pressed={stream.portraitMode} on:click={() => onPortraitMode(true)}>
+              <Smartphone size={18} class="shrink-0" /><span><strong class="block">Portrait</strong><span class="block text-xs text-[var(--muted)]">Bar hitam kiri-kanan</span></span>
+            </button>
+          </div>
+          <p id="framing-help" class="mt-2 text-xs font-semibold text-[var(--faint)]">Framing dikunci setelah kamera dimulai.</p>
+        </fieldset>
+
+        <div class="mt-4 flex flex-col gap-2 sm:flex-row">
+          <button class="button-primary flex flex-1 items-center justify-center gap-2" type="button" on:click={onStart} disabled={starting || Boolean(capture)}>
+            {#if starting}
+              <Activity size={18} class="animate-pulse" /><span>Membuka kamera...</span>
+            {:else if capture}
+              <Check size={18} /><span>Kamera dan relay aktif</span>
+            {:else}
+              <Play size={18} /><span>Start camera &amp; relay</span>
+            {/if}
+          </button>
+          <button class="button-danger flex items-center justify-center gap-2" type="button" on:click={onStop}>
+            <CircleStop size={18} /><span>Stop job</span>
+          </button>
+        </div>
       </div>
     </section>
 

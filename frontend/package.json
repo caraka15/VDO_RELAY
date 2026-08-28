@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "check": "svelte-check --tsconfig ./tsconfig.json --config ./svelte.config.js"
+    "check": "svelte-check --tsconfig ./tsconfig.json --config ./svelte.config.js",
+    "test:flow": "node scripts/check-job-flow.mjs"
   },
   "dependencies": {
     "@lucide/svelte": "^1.34.0",

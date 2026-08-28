@@ -20,6 +20,7 @@ export type CaptureSession = {
   canvas: HTMLCanvasElement;
   actualWidth: number;
   actualHeight: number;
+  actualFps: number;
   stop: () => void;
 };
 
@@ -36,6 +37,10 @@ export function mediaAccessError(error: unknown, request: MediaDeviceRequest): E
   const device = request === "camera" ? "kamera" : request === "microphone" ? "mikrofon" : "kamera/mikrofon";
   if (name === "NotAllowedError" || name === "SecurityError") {
     return new Error(`Izin ${device} ditolak. Tekan ikon di kiri alamat Chrome → Izin situs → izinkan ${device}, lalu muat ulang halaman.`);
+  }
+  if (name === "OverconstrainedError") {
+    const constraint = error && typeof error === "object" && "constraint" in error ? String(error.constraint) : "resolusi/FPS";
+    return new Error(`Profile kamera tidak didukung pada ${constraint}. Stop job lalu buat stream baru dengan resolusi atau FPS lebih rendah.`);
   }
   if (name === "NotFoundError") return new Error(`${device[0].toUpperCase()}${device.slice(1)} tidak ditemukan pada perangkat ini.`);
   if (name === "NotReadableError" || name === "TrackStartError") return new Error(`${device[0].toUpperCase()}${device.slice(1)} sedang dipakai aplikasi lain.`);
@@ -167,17 +172,14 @@ export async function openCapture(
     throw new Error("Tidak ada kamera yang tersedia.");
   }
   const settings = sourceTrack.getSettings();
-  const actualWidth = settings.width || input.width;
-  const actualHeight = settings.height || input.height;
-  const [actualMin, actualMax] = sortedDimensions(actualWidth, actualHeight);
-  const [targetMin, targetMax] = sortedDimensions(input.width, input.height);
-  if (actualMin < targetMin || actualMax < targetMax) {
+  const actualFps = settings.frameRate;
+  if (typeof actualFps !== "number" || !Number.isFinite(actualFps)) {
     sourceStream.getTracks().forEach((track) => track.stop());
-    throw new Error(`Kamera hanya memberi ${actualWidth}×${actualHeight}; profile ${input.width}×${input.height} tidak didukung. Pilih resolusi lebih rendah.`);
+    throw new Error("Browser tidak melaporkan FPS kamera aktual; profile tidak dapat diverifikasi.");
   }
-  if (settings.frameRate !== undefined && settings.frameRate + 0.5 < input.fps) {
+  if (actualFps + 0.5 < input.fps) {
     sourceStream.getTracks().forEach((track) => track.stop());
-    throw new Error(`Kamera hanya berjalan ${settings.frameRate} FPS; profile ${input.fps} FPS tidak didukung.`);
+    throw new Error(`Kamera hanya berjalan ${actualFps} FPS; profile ${input.fps} FPS tidak didukung.`);
   }
 
   const video = document.createElement("video");
@@ -207,6 +209,26 @@ export async function openCapture(
     sourceStream.getTracks().forEach((track) => track.stop());
     video.remove();
     throw new Error(`Preview kamera gagal dimulai: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const actualWidth = video.videoWidth || settings.width;
+  const actualHeight = video.videoHeight || settings.height;
+  if (typeof actualWidth !== "number" || !Number.isFinite(actualWidth) || actualWidth <= 0 ||
+      typeof actualHeight !== "number" || !Number.isFinite(actualHeight) || actualHeight <= 0) {
+    sourceStream.getTracks().forEach((track) => track.stop());
+    video.pause();
+    video.srcObject = null;
+    video.remove();
+    throw new Error("Browser tidak melaporkan resolusi kamera aktual; profile tidak dapat diverifikasi.");
+  }
+  const [actualMin, actualMax] = sortedDimensions(actualWidth, actualHeight);
+  const [targetMin, targetMax] = sortedDimensions(input.width, input.height);
+  if (actualMin < targetMin || actualMax < targetMax) {
+    sourceStream.getTracks().forEach((track) => track.stop());
+    video.pause();
+    video.srcObject = null;
+    video.remove();
+    throw new Error(`Kamera hanya memberi ${actualWidth}×${actualHeight}; profile ${input.width}×${input.height} tidak didukung. Pilih resolusi lebih rendah.`);
   }
 
   const canvas = document.createElement("canvas");
@@ -260,6 +282,7 @@ export async function openCapture(
     canvas,
     actualWidth,
     actualHeight,
+    actualFps,
     stop: () => {
       running = false;
       cancelAnimationFrame(animationFrame);
@@ -269,6 +292,7 @@ export async function openCapture(
       video.pause();
       video.srcObject = null;
       video.remove();
+      canvas.remove();
     },
   };
 }

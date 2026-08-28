@@ -76,14 +76,17 @@ native. Browser tidak memiliki akses UDP/SRT mentah.
 
 1. Operator memilih `New stream`.
 2. Browser menyediakan deteksi kamera dan tombol cek microphone terpisah;
-   Start stream meminta izin kamera dan microphone yang diperlukan.
+   pemeriksaan ini opsional dan hanya membuka track sementara.
 3. Browser mengecek dukungan codec dan konfigurasi encoder.
 4. Operator memilih kamera, microphone, codec, resolusi, FPS, bitrate maksimum,
    mode portrait, dan recording.
-5. Browser menjalankan preflight encode singkat dengan konfigurasi tersebut.
-6. Backend membuat path MediaMTX dan token stream.
-7. Browser mulai mengirim encoded media ke MediaMTX.
-8. Dashboard menampilkan status dan SRT URL untuk OBS.
+5. Tombol `Create stream` meminta backend membuat path MediaMTX dan token;
+   kamera belum dibuka pada tahap ini.
+6. Halaman kontrol menampilkan preview 16:9 kosong, framing, tombol Start/Stop,
+   dan SRT URL yang sudah dapat disalin.
+7. Tombol `Start camera & relay` menjalankan preflight profile, meminta kamera
+   dan microphone, lalu mulai mengirim encoded media ke MediaMTX.
+8. Halaman kontrol menampilkan status dan telemetry live.
 
 Kegagalan capability atau preflight harus menghentikan proses dengan pesan
 yang menjelaskan penyebab dan tindakan perbaikan. Tidak boleh ada fallback
@@ -135,8 +138,15 @@ Browser mengecek dukungan `VideoEncoder.isConfigSupported()` untuk:
 - VP8;
 - AV1.
 
-`isConfigSupported()` dianggap sebagai pre-check, bukan jaminan performa.
-Browser tetap harus melakukan preflight encode menggunakan kamera yang dipilih.
+`isConfigSupported()` dianggap sebagai probe encoder umum, bukan daftar profile
+kamera, jaminan hardware encoder, atau jaminan performa. UI harus menyebut
+resolusi/FPS yang dipakai probe dan tidak boleh melabeli seluruh profile kamera
+sebagai tersedia.
+
+Saat operator menekan Start pada job yang sudah dibuat, browser harus memeriksa
+konfigurasi encoder pilihan, membuka kamera, lalu membaca resolusi dan FPS aktual
+dari metadata video/track. Nilai yang tidak dilaporkan atau lebih rendah dari
+profile pilihan harus ditolak; nilai request tidak boleh dipakai sebagai fallback.
 
 VP8, VP9, dan AV1 dapat ditampilkan sebagai informasi capability, tetapi tidak
 dapat dipilih untuk profile SRT v1 karena output SRT MediaMTX difokuskan pada
@@ -270,6 +280,9 @@ Pesan error harus menyebutkan penyebab dan tindakan:
 - SQLite dan recording tetap ada setelah image/container di-rebuild karena
   `/data` di-bind mount ke folder host.
 - Pengguna anonim tidak dapat membuat stream atau membaca SRT.
+- `Create stream` menghasilkan job dan SRT URL sebelum kamera dibuka.
+- Kegagalan kamera pada Start tidak menghapus job; operator dapat memperbaiki
+  profile atau menghentikan job secara eksplisit.
 - H.264/H.265 yang lolos preflight dapat live ke MediaMTX.
 - VP8/VP9/AV1 dapat dideteksi dan diberi status kompatibilitas yang benar.
 - Resolusi, FPS, dan codec tidak berubah ketika adaptive bitrate aktif.

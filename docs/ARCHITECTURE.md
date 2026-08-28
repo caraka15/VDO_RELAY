@@ -70,17 +70,23 @@ deployment semuanya berada dalam satu container.
 
 ### 3.1 Browser ke MediaMTX
 
-1. Svelte meminta `getUserMedia()`.
-2. Browser membaca capability encoder melalui `VideoEncoder.isConfigSupported()`.
-3. `MediaStreamTrackProcessor` membaca frame kamera.
-4. Frame digambar ke canvas output berukuran tetap 16:9.
-5. Canvas menghasilkan frame portrait/landscape yang sudah memiliki black bar
+1. Svelte memanggil `POST /api/streams`; backend membuat path, publish token,
+   read token, SRT URL, dan player URL tanpa membuka kamera.
+2. Halaman kontrol masuk ke state `ready` dan menampilkan preview kosong.
+3. Setelah operator menekan Start, browser memeriksa konfigurasi encoder pilihan
+   melalui `VideoEncoder.isConfigSupported()` lalu meminta `getUserMedia()`.
+4. Browser membandingkan metadata resolusi dan FPS track aktual dengan profile.
+   Profile ditolak jika metadata hilang atau lebih rendah; tidak ada fallback ke
+   nilai yang diminta.
+5. `MediaStreamTrackProcessor` membaca frame kamera.
+6. Frame digambar ke canvas output berukuran tetap 16:9.
+7. Canvas menghasilkan frame portrait/landscape yang sudah memiliki black bar
    bila diperlukan.
-6. `VideoEncoder` menghasilkan H.264 atau H.265.
-7. `AudioEncoder` menghasilkan AAC atau Opus bila audio aktif.
-8. Encoded chunks dikirim melalui publisher Media-over-QUIC resmi MediaMTX
+8. `VideoEncoder` menghasilkan H.264 atau H.265.
+9. `AudioEncoder` menghasilkan AAC atau Opus bila audio aktif.
+10. Encoded chunks dikirim melalui publisher Media-over-QUIC resmi MediaMTX
    yang divendor dari release yang dipin.
-9. MediaMTX menerima encoded media pada path stream.
+11. MediaMTX menerima encoded media pada path stream.
 
 Media-over-QUIC membutuhkan HTTPS serta akses TCP dan UDP pada port yang sama.
 Browser publishing saat ini diarahkan ke Chrome karena pipeline publishing

@@ -24,11 +24,11 @@
   export let microphoneError = "";
   export let selectedCodec: "h264" | "h265" = "h265";
   export let detecting = false;
-  export let starting = false;
+  export let creating = false;
   export let error = "";
   export let onDetect: () => void;
   export let onCheckMicrophone: () => void;
-  export let onStart: (input: StartStreamInput & { deviceId?: string; audioDeviceId?: string }) => void;
+  export let onCreate: (input: StartStreamInput & { deviceId?: string; audioDeviceId?: string }) => void;
   export let onBack: () => void;
 
   const resolutions = [
@@ -62,7 +62,7 @@
 
   function submit() {
     if (!selectedCapability?.supported) return;
-    onStart({
+    onCreate({
       codec: selectedCodec,
       width: resolution.width,
       height: resolution.height,
@@ -86,7 +86,7 @@
     <div>
       <p class="mono mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">NEW STREAM / 01</p>
       <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Siapkan output</h1>
-      <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilih profile encoder di perangkat. Server hanya menerima hasil encode dan merelay ke OBS.</p>
+      <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilih profile lalu buat job server. Kamera dan relay baru berjalan setelah Anda menekan Start di halaman kontrol.</p>
     </div>
     <button class="button-quiet flex items-center gap-2" type="button" on:click={() => onBack()}>
       <span>Dashboard</span>
@@ -109,7 +109,7 @@
         </div>
         <button class="button-secondary flex items-center gap-2" type="button" on:click={onDetect} disabled={detecting}>
           <RefreshCw size={17} class={detecting ? "animate-spin" : ""} />
-          <span>{detecting ? "Mendeteksi..." : "Deteksi perangkat"}</span>
+          <span>{detecting ? "Membaca device..." : "Izin & daftar device"}</span>
         </button>
       </div>
 
@@ -125,7 +125,7 @@
               {/each}
             {/if}
           </select>
-          <p class="mt-2 text-xs font-semibold text-[var(--faint)]">Resolusi kamera divalidasi ulang saat Start; tidak ada fallback diam-diam.</p>
+          <p class="mt-2 text-xs font-semibold text-[var(--faint)]">Tombol di atas hanya meminta izin dan membaca daftar device. Profile kamera aktual diverifikasi saat Start; tidak ada fallback diam-diam.</p>
         </div>
 
         <fieldset>
@@ -165,6 +165,7 @@
             </select>
           </div>
         </div>
+        <p class="text-xs font-semibold text-[var(--faint)]">Resolusi dan FPS ini adalah target output, bukan daftar profile yang diklaim tersedia oleh kamera.</p>
       </div>
     </section>
 
@@ -172,28 +173,28 @@
       <section class="panel p-5 sm:p-6" aria-labelledby="encoder-heading">
         <div class="mb-5 flex items-center gap-2 text-[var(--accent)]"><ShieldCheck size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">Encoder</span></div>
         <h2 id="encoder-heading" class="text-xl font-extrabold">Codec untuk SRT</h2>
-        <p class="mt-2 text-sm leading-6 text-[var(--muted)]">Deteksi browser menampilkan semua codec. Hanya H.264 dan H.265 yang bisa dipilih untuk output SRT v1.</p>
+        <p class="mt-2 text-sm leading-6 text-[var(--muted)]">Probe awal hanya memeriksa apakah browser menerima encoder 1280×720 / 30 FPS; ini bukan bukti hardware encoder. Profile pilihan diperiksa lagi saat Start. Hanya H.264 dan H.265 yang bisa dipilih untuk SRT v1.</p>
 
         <div class="mt-5 grid grid-cols-2 gap-3">
           <button class="min-h-[74px] border p-3 text-left transition-colors" class:border-[var(--accent)]={selectedCodec === "h264"} class:bg-[var(--surface-strong)]={selectedCodec === "h264"} class:border-[var(--border)]={selectedCodec !== "h264"} type="button" on:click={() => chooseCodec("h264")} disabled={!h264?.supported}>
             <span class="mono block text-sm font-extrabold">H.264</span>
-            <span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h264?.supported} class:text-[var(--faint)]={!h264?.supported}>{h264?.supported ? "tersedia" : "tidak tersedia"}</span>
+            <span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h264?.supported} class:text-[var(--faint)]={!h264?.supported}>{h264?.supported ? "probe 720p30 lolos" : "probe tidak lolos"}</span>
           </button>
           <button class="min-h-[74px] border p-3 text-left transition-colors" class:border-[var(--accent)]={selectedCodec === "h265"} class:bg-[var(--surface-strong)]={selectedCodec === "h265"} class:border-[var(--border)]={selectedCodec !== "h265"} type="button" on:click={() => chooseCodec("h265")} disabled={!h265?.supported}>
             <span class="mono block text-sm font-extrabold">H.265</span>
-            <span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h265?.supported} class:text-[var(--faint)]={!h265?.supported}>{h265?.supported ? "tersedia" : "tidak tersedia"}</span>
+            <span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h265?.supported} class:text-[var(--faint)]={!h265?.supported}>{h265?.supported ? "probe 720p30 lolos" : "probe tidak lolos"}</span>
           </button>
         </div>
 
         <div class="mt-5 border-t border-[var(--border)] pt-4">
-          <p class="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Capability terdeteksi</p>
+          <p class="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Probe encoder · 720p30</p>
           <div class="flex flex-wrap gap-2">
             {#each codecs as codec}
               <span class="inline-flex items-center gap-1.5 border px-2.5 py-1 text-xs font-bold" class:border-[#3c7154]={codec.supported} class:bg-[#1b3026]={codec.supported} class:text-[var(--success)]={codec.supported} class:border-[var(--border)]={!codec.supported} class:text-[var(--faint)]={!codec.supported}>
                 {#if codec.supported}<Check size={13} />{/if}{codec.label}
               </span>
             {/each}
-            {#if codecs.length === 0}<span class="text-xs font-semibold text-[var(--faint)]">Klik deteksi untuk membaca capability browser.</span>{/if}
+            {#if codecs.length === 0}<span class="text-xs font-semibold text-[var(--faint)]">Browser belum melaporkan dukungan encoder.</span>{/if}
           </div>
         </div>
       </section>
@@ -224,14 +225,14 @@
                   {/if}
                 </span></span></span>
               </label>
-              <button class="button-secondary min-h-[52px] shrink-0" type="button" on:click={onCheckMicrophone} disabled={microphoneChecking || detecting || starting}>
+              <button class="button-secondary min-h-[52px] shrink-0" type="button" on:click={onCheckMicrophone} disabled={microphoneChecking || detecting || creating}>
                 {microphoneChecking ? "Mengecek..." : microphonePermission === "granted" ? "Cek lagi" : "Cek mic"}
               </button>
             </div>
             {#if microphoneError}
               <p class="mt-2 border border-[#844a52] bg-[#321c22] p-3 text-xs font-semibold leading-5 text-[var(--danger)]" role="alert">{microphoneError}</p>
             {:else}
-              <p class="mt-2 text-xs font-semibold text-[var(--faint)]">Cek mic hanya meminta izin sebentar lalu menghentikan track; audio belum dikirim sebelum Start stream.</p>
+              <p class="mt-2 text-xs font-semibold text-[var(--faint)]">Cek mic hanya meminta izin sebentar lalu menghentikan track; audio belum dikirim sebelum Start di halaman kontrol.</p>
             {/if}
             {#if microphoneDevices.length > 0}
               <div class="mt-3">
@@ -261,11 +262,11 @@
 
   <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
     <button class="button-secondary" type="button" on:click={() => onBack()}>Batalkan</button>
-    <button class="button-primary flex items-center justify-center gap-2 sm:min-w-[190px]" type="button" on:click={submit} disabled={starting || detecting || !selectedCapability?.supported || (audioEnabled && !audioReady)}>
-      {#if starting}
-        <RefreshCw size={17} class="animate-spin" /><span>Menyiapkan...</span>
+    <button class="button-primary flex items-center justify-center gap-2 sm:min-w-[190px]" type="button" on:click={submit} disabled={creating || detecting || !selectedCapability?.supported || (audioEnabled && !audioReady)}>
+      {#if creating}
+        <RefreshCw size={17} class="animate-spin" /><span>Membuat job...</span>
       {:else}
-        <Radio size={17} /><span>Start stream</span>
+        <Radio size={17} /><span>Create stream</span>
       {/if}
     </button>
   </div>
