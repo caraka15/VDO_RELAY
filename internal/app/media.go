@@ -26,6 +26,8 @@ type mediaManager struct {
 	cancel context.CancelFunc
 }
 
+const maxReadersPerPath = 10
+
 func newMediaManager(cfg Config) *mediaManager {
 	return &mediaManager{cfg: cfg, client: &http.Client{Timeout: 3 * time.Second}}
 }
@@ -122,7 +124,7 @@ type pathConfig struct {
 func (m *mediaManager) addPath(ctx context.Context, path string, record bool) error {
 	return m.control(ctx, http.MethodPost, "/v3/config/paths/add/"+url.PathEscape(path), pathConfig{
 		Record:     record,
-		MaxReaders: 1,
+		MaxReaders: maxReadersPerPath,
 	})
 }
 
@@ -136,7 +138,7 @@ func (m *mediaManager) deletePath(ctx context.Context, path string) error {
 }
 
 func (m *mediaManager) patchPath(ctx context.Context, path string, record bool) error {
-	return m.control(ctx, http.MethodPatch, "/v3/config/paths/patch/"+url.PathEscape(path), pathConfig{Record: record})
+	return m.control(ctx, http.MethodPatch, "/v3/config/paths/patch/"+url.PathEscape(path), pathConfig{Record: record, MaxReaders: maxReadersPerPath})
 }
 
 func (m *mediaManager) ensurePath(ctx context.Context, path string, record bool) error {
@@ -185,9 +187,9 @@ func (e mediaControlError) Error() string {
 }
 
 type mediaPathStats struct {
-	Ready         bool
-	BytesReceived uint64
-	Readers       int
+	Ready        bool
+	InboundBytes uint64
+	Readers      int
 }
 
 func (m *mediaManager) pathStats(ctx context.Context, path string) (mediaPathStats, error) {
@@ -207,14 +209,14 @@ func (m *mediaManager) pathStats(ctx context.Context, path string) (mediaPathSta
 		return mediaPathStats{}, fmt.Errorf("MediaMTX path API returned %s", response.Status)
 	}
 	var payload struct {
-		Ready         bool              `json:"ready"`
-		BytesReceived uint64            `json:"bytesReceived"`
-		Readers       []json.RawMessage `json:"readers"`
+		Ready        bool              `json:"ready"`
+		InboundBytes uint64            `json:"inboundBytes"`
+		Readers      []json.RawMessage `json:"readers"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		return mediaPathStats{}, err
 	}
-	return mediaPathStats{Ready: payload.Ready, BytesReceived: payload.BytesReceived, Readers: len(payload.Readers)}, nil
+	return mediaPathStats{Ready: payload.Ready, InboundBytes: payload.InboundBytes, Readers: len(payload.Readers)}, nil
 }
 
 func (m *mediaManager) configText() string {
@@ -260,7 +262,7 @@ authHTTPExclude:
 
 pathDefaults:
   record: false
-  maxReaders: 1
+  maxReaders: %d
   recordPath: %s
   recordFormat: fmp4
   recordPartDuration: 1s
@@ -269,7 +271,7 @@ pathDefaults:
 
 paths:
   all_others:
-`, cert, key, additionalHost, authURL, recordPath)
+	`, cert, key, additionalHost, authURL, maxReadersPerPath, recordPath)
 }
 
 func webRTCAdditionalHost(base string) string {

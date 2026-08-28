@@ -33,7 +33,8 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 - Session cookie `HttpOnly`, `Secure`, `SameSite=Strict`.
 - Dashboard hanya untuk operator terautentikasi.
 - Maksimum awal 8 job open.
-- Satu job maksimum satu pembaca SRT.
+- Satu job maksimum 10 reader gabungan, termasuk OBS melalui SRT dan player
+  browser melalui WHEP.
 
 ## 4. Alur UX
 
@@ -80,7 +81,11 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 ### Video
 
 - Resolusi dan FPS adalah mode capture kamera serta dimensi final encoded track.
-- Kandidat v1: 1920×1080, 1280×720, 854×480; FPS 24/30/60.
+- Probe memulai dari 1920×1080, 1280×720, dan 854×480 pada FPS 24/30/60,
+  lalu menambahkan ukuran/FPS default dan maksimum yang dilaporkan kamera.
+- Hanya kombinasi yang berhasil dibuka dengan constraint `exact` dan cocok
+  dengan `getSettings()` yang ditampilkan. Karena itu mode native seperti
+  2304×1728 juga dapat dipilih bila memang tersedia.
 - Portrait menukar dimensi request kamera, bukan merender canvas baru.
 - Nilai bitrate di UI adalah batas maksimum encoder WebRTC.
 - WebRTC boleh mengirim bitrate aktual lebih rendah karena scene atau network;
@@ -215,4 +220,5 @@ dan UDP 8890 untuk SRT tetap direct.
 - Tidak ada canvas, WebCodecs, WebTransport, atau MoQ di pipeline browser.
 - Recording off tidak membuat file; recording on menghasilkan fMP4 yang dapat
   di-download dan dihapus.
-- 8 job tetap menjadi limit awal dan hanya satu SRT reader per job.
+- 8 job tetap menjadi limit awal dan setiap job memiliki maksimum 10 reader
+  gabungan, termasuk SRT/OBS dan player WHEP.

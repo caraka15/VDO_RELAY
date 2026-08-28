@@ -67,12 +67,10 @@ Script memastikan perubahan source sudah bersih, menjalankan `git pull
 docker compose up -d --build
 ```
 
-Pada migrasi WHIP, `update.sh` tidak menjalankan `certbot --nginx`, tidak
-menimpa seluruh vhost, dan tidak mengubah `sites-enabled`. Jika menemukan
-blok media lama yang persis dikenali, script membuat backup di
-`/etc/nginx/sites-available/vdo-relay.backup.<timestamp>` lalu hanya mengganti
-`location /` ke upstream WHIP/WHEP. Jika konfigurasi sudah dikustomisasi atau
-tidak dikenali, update berhenti agar vhost diperiksa manual.
+Setelah instalasi, `update.sh` tidak menyentuh vhost Nginx atau menjalankan
+`certbot --nginx`; konfigurasi HTTPS dan custom directive yang dibuat Certbot
+tetap milik server. Jika domain, proxy, atau port Nginx berubah, ubah vhost
+secara manual lalu jalankan `nginx -t` sebelum reload.
 
 File runtime `data/`, `certs/`, `tools/`, dan asset build lokal sudah di-ignore
 Git. SQLite dan recording berada di `./data`, jadi tidak hilang saat rebuild.
@@ -105,7 +103,7 @@ tidak merender ulang file tersebut.
 2. Pilih orientasi yang ingin diminta ke kamera.
 3. Tekan Deteksi. Browser meminta izin kamera dan mikrofon.
 4. Pilih kamera. Resolusi/FPS hanya menampilkan kombinasi yang berhasil diuji
-   dengan constraint `exact`.
+   dengan constraint `exact`, termasuk mode native yang dilaporkan kamera.
 5. Pilih codec WebRTC yang tersedia, audio Opus, bitrate maksimum, dan record.
 6. Tekan `Create stream`. Ini hanya membuat job dan URL; kamera belum live.
 7. Di halaman job, tekan `Start`. Kamera dibuka ulang, diuji lagi, lalu WHIP
@@ -114,13 +112,16 @@ tidak merender ulang file tersebut.
    kembali dari dashboard.
 
 `Stop` menghentikan sesi media tetapi tidak menghapus job. `Delete` menghapus
-job dan mencabut token. Satu job dibatasi satu pembaca SRT.
+job dan mencabut token. Satu job memiliki maksimum 10 reader gabungan, termasuk
+OBS melalui SRT dan player browser melalui WHEP.
 
 ## Kamera, codec, dan orientasi
 
 Resolusi/FPS yang dipilih adalah mode capture kamera dan juga ukuran final track
-yang dikirim. Tidak ada upscale, canvas, rotate, atau black bar yang masuk ke
-file. Black bar desktop hanya bagian kotak preview.
+yang dikirim. Detector juga menguji ukuran/FPS default dan maksimum yang
+dilaporkan kamera, bukan hanya preset 16:9. Tidak ada upscale, canvas, rotate,
+atau black bar yang masuk ke file. Black bar desktop hanya bagian kotak
+preview.
 
 Pada mobile, preview mengikuti bentuk aplikasi kamera: stage tetap memenuhi
 layar dan track landscape diputar dengan CSS hanya untuk tampilan. Transform

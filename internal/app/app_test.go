@@ -85,6 +85,30 @@ func TestMediaOriginsAllowBrowserAliases(t *testing.T) {
 	if !strings.Contains(config, "webrtcAddress: :8889") || !strings.Contains(config, "webrtcLocalUDPAddress: :8189") {
 		t.Fatal("WebRTC handshake and ICE listeners are not configured")
 	}
+	if !strings.Contains(config, "maxReaders: 10") {
+		t.Fatal("each path must allow up to ten readers")
+	}
+}
+
+func TestMediaPathStatsUsesInboundBytes(t *testing.T) {
+	mediaAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/paths/get/vdo-test" {
+			t.Fatalf("unexpected path stats endpoint: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"ready":true,"inboundBytes":123456,"bytesReceived":1,"readers":[{},{}]}`))
+	}))
+	defer mediaAPI.Close()
+
+	stats, err := newMediaManager(Config{ControlURL: mediaAPI.URL}).pathStats(context.Background(), "vdo-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.InboundBytes != 123456 {
+		t.Fatalf("inbound bytes = %d, want 123456", stats.InboundBytes)
+	}
+	if stats.Readers != 2 {
+		t.Fatalf("readers = %d, want 2", stats.Readers)
+	}
 }
 
 func TestReusableStreamTokens(t *testing.T) {
@@ -264,13 +288,16 @@ func TestStreamValidation(t *testing.T) {
 	}
 	for name, input := range map[string]createStreamRequest{
 		"codec":      {Codec: "vp9", Width: 1920, Height: 1080, FPS: 30, MaxBitrateKbps: 4000},
-		"resolution": {Codec: "h264", Width: 1280, Height: 800, FPS: 30, MaxBitrateKbps: 4000},
-		"fps":        {Codec: "h264", Width: 1280, Height: 720, FPS: 25, MaxBitrateKbps: 4000},
+		"resolution": {Codec: "h264", Width: 1281, Height: 800, FPS: 30, MaxBitrateKbps: 4000},
+		"fps":        {Codec: "h264", Width: 1280, Height: 720, FPS: 121, MaxBitrateKbps: 4000},
 		"bitrate":    {Codec: "h264", Width: 1280, Height: 720, FPS: 30, MaxBitrateKbps: 499},
 	} {
 		if err := input.validate(); err == nil {
 			t.Fatalf("%s profile unexpectedly accepted", name)
 		}
+	}
+	if err := (createStreamRequest{Codec: "h264", Width: 2304, Height: 1728, FPS: 30, MaxBitrateKbps: 4000}).validate(); err != nil {
+		t.Fatalf("native 2304x1728 profile rejected: %v", err)
 	}
 }
 

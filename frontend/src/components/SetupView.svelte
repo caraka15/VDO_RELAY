@@ -2,8 +2,7 @@
   import { Activity, AlertCircle, Camera, Check, CircleHelp, HardDrive, Mic, Radio, RefreshCw, ShieldCheck, Smartphone, Video, X, Zap } from "@lucide/svelte";
   import type { StartStreamInput } from "../lib/api";
   import {
-    CAMERA_FPS_OPTIONS,
-    CAMERA_RESOLUTIONS,
+    cameraResolutionLabel,
     probeCameraProfiles,
     probeVideoCodecs,
     type AudioCapability,
@@ -54,19 +53,19 @@
   $: selectedAudioCapability = audioCodecs.find((codec) => codec.key === effectiveAudioCodec);
   $: if (devices.length > 0 && (!selectedDeviceId || !devices.some((device) => device.deviceId === selectedDeviceId))) selectedDeviceId = devices[0].deviceId;
   $: selectedDevice = devices.find((device) => device.deviceId === selectedDeviceId);
-  $: availableResolutions = CAMERA_RESOLUTIONS.filter((resolution) => {
-    const size = outputDimensions(resolution);
-    return cameraProfiles.some((profile) => profile.width === size.width && profile.height === size.height);
-  });
+  $: availableResolutions = Array.from(new Map(cameraProfiles.map((profile) => {
+    const key = `${profile.width}x${profile.height}`;
+    return [key, { label: cameraResolutionLabel(Math.max(profile.width, profile.height), Math.min(profile.width, profile.height)), width: profile.width, height: profile.height }];
+  })).values());
   $: if (availableResolutions.length > 0 && !availableResolutions.some((resolution) => resolutionKey === resolutionValue(resolution))) resolutionKey = resolutionValue(availableResolutions[0]);
   $: if (availableResolutions.length === 0) resolutionKey = "";
-  $: selectedResolution = CAMERA_RESOLUTIONS.find((resolution) => resolutionValue(resolution) === resolutionKey);
-  $: outputSize = selectedResolution ? outputDimensions(selectedResolution) : { width: 0, height: 0 };
+  $: selectedResolution = availableResolutions.find((resolution) => resolutionValue(resolution) === resolutionKey);
+  $: outputSize = selectedResolution || { width: 0, height: 0 };
   $: availableFps = selectedResolution
-    ? CAMERA_FPS_OPTIONS.filter((value) => cameraProfiles.some((profile) => profile.width === outputSize.width && profile.height === outputSize.height && profile.fps === value))
+    ? Array.from(new Set(cameraProfiles.filter((profile) => profile.width === outputSize.width && profile.height === outputSize.height).map((profile) => profile.fps))).sort((a, b) => a - b)
     : [];
-  $: if (availableFps.length > 0 && !availableFps.includes(fps as (typeof CAMERA_FPS_OPTIONS)[number])) fps = availableFps[0];
-  $: profileSupported = Boolean(selectedResolution && availableFps.includes(fps as (typeof CAMERA_FPS_OPTIONS)[number]));
+  $: if (availableFps.length > 0 && !availableFps.includes(fps)) fps = availableFps[0];
+  $: profileSupported = Boolean(selectedResolution && availableFps.includes(fps));
   $: outputWidth = outputSize.width;
   $: outputHeight = outputSize.height;
   $: estimatedHourlyGB = ((maxBitrateKbps * 1000) / 8 * 3600) / 1024 ** 3;
@@ -75,19 +74,14 @@
     lastOutputProbe = outputProfileKey;
     void checkOutputProfile(outputProfileKey, selectedCodec);
   }
-  $: profileProbeKey = `${selectedDeviceId || "default"}:${outputOrientation}`;
+  $: profileProbeKey = `${selectedDeviceId || "default"}:${outputOrientation}:${selectedDevice?.maxWidth || 0}x${selectedDevice?.maxHeight || 0}@${selectedDevice?.maxFps || 0}:${selectedDevice?.defaultWidth || 0}x${selectedDevice?.defaultHeight || 0}@${selectedDevice?.defaultFps || 0}`;
   $: if (devices.length > 0 && !detecting && profileProbeKey !== lastProfileProbe) {
     lastProfileProbe = profileProbeKey;
     void checkCameraProfiles(profileProbeKey, selectedDeviceId || undefined, outputOrientation === "portrait", selectedDevice);
   }
 
-  function outputDimensions(option: { width: number; height: number }) {
-    return outputOrientation === "portrait" ? { width: option.height, height: option.width } : option;
-  }
-
   function resolutionValue(option: { width: number; height: number }) {
-    const size = outputDimensions(option);
-    return `${size.width}x${size.height}`;
+    return `${option.width}x${option.height}`;
   }
 
   async function checkCameraProfiles(key: string, deviceId: string | undefined, portrait: boolean, device: CameraDevice | undefined) {
@@ -99,7 +93,7 @@
       const profiles = await probeCameraProfiles(deviceId, portrait, device);
       if (sequence !== profileProbeSequence || key !== profileProbeKey) return;
       cameraProfiles = profiles;
-      if (profiles.length === 0) profileError = "Tidak ada kombinasi resolusi/FPS exact yang bisa dibuktikan dari kamera ini. Pilih kamera lain atau ubah orientasi.";
+      if (profiles.length === 0) profileError = "Kamera tidak menyetujui mode exact yang diuji. Pilih sumber kamera lain atau ubah orientasi.";
     } catch (probeError) {
       if (sequence === profileProbeSequence && key === profileProbeKey) profileError = probeError instanceof Error ? probeError.message : "Mode kamera belum bisa diperiksa.";
     } finally {

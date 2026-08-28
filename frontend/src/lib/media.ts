@@ -22,6 +22,9 @@ export type CameraDevice = {
   maxWidth: number;
   maxHeight: number;
   maxFps: number;
+  defaultWidth: number;
+  defaultHeight: number;
+  defaultFps: number;
   zoom: { min: number; max: number; step: number } | null;
   torch: boolean;
 };
@@ -118,9 +121,33 @@ export async function probeCameraDevices(): Promise<CameraDevice[]> {
         : null;
       const torch = capabilities.torch === true;
       const facingMode = Array.isArray(capabilities.facingMode) ? capabilities.facingMode[0] || "" : String(capabilities.facingMode || settings.facingMode || "");
-      result.push({ deviceId: device.deviceId, label: device.label || `Kamera ${result.length + 1}`, facingMode, maxWidth, maxHeight, maxFps, zoom, torch });
+      result.push({
+        deviceId: device.deviceId,
+        label: device.label || `Kamera ${result.length + 1}`,
+        facingMode,
+        maxWidth,
+        maxHeight,
+        maxFps,
+        defaultWidth: finiteNumber(settings.width) || 0,
+        defaultHeight: finiteNumber(settings.height) || 0,
+        defaultFps: finiteNumber(settings.frameRate) || 0,
+        zoom,
+        torch,
+      });
     } catch {
-      result.push({ deviceId: device.deviceId, label: device.label || `Kamera ${result.length + 1}`, facingMode: "", maxWidth: 0, maxHeight: 0, maxFps: 0, zoom: null, torch: false });
+      result.push({
+        deviceId: device.deviceId,
+        label: device.label || `Kamera ${result.length + 1}`,
+        facingMode: "",
+        maxWidth: 0,
+        maxHeight: 0,
+        maxFps: 0,
+        defaultWidth: 0,
+        defaultHeight: 0,
+        defaultFps: 0,
+        zoom: null,
+        torch: false,
+      });
     } finally {
       stream?.getTracks().forEach((track) => track.stop());
     }
@@ -138,11 +165,44 @@ function exactCameraConstraints(profile: CameraProfile, deviceId?: string): Medi
   } as MediaTrackConstraints;
 }
 
+function canonicalResolution(width: number, height: number): { width: number; height: number } | null {
+  if (!width || !height) return null;
+  return { width: Math.max(width, height), height: Math.min(width, height) };
+}
+
+export function cameraResolutionLabel(width: number, height: number): string {
+  const known = CAMERA_RESOLUTIONS.find((resolution) => resolution.width === width && resolution.height === height);
+  return known?.label || `${width} × ${height}`;
+}
+
+function cameraResolutionCandidates(device?: CameraDevice): { width: number; height: number }[] {
+  const candidates: { width: number; height: number }[] = CAMERA_RESOLUTIONS.map(({ width, height }) => ({ width, height }));
+  const seen = new Set(candidates.map((candidate) => `${candidate.width}x${candidate.height}`));
+  for (const [width, height] of [
+    [device?.maxWidth || 0, device?.maxHeight || 0],
+    [device?.defaultWidth || 0, device?.defaultHeight || 0],
+  ]) {
+    const resolution = canonicalResolution(width, height);
+    if (!resolution) continue;
+    const key = `${resolution.width}x${resolution.height}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      candidates.push(resolution);
+    }
+  }
+  return candidates;
+}
+
 export async function probeCameraProfiles(deviceId: string | undefined, portrait: boolean, device?: CameraDevice): Promise<CameraProfile[]> {
-  const profiles = CAMERA_RESOLUTIONS.flatMap((resolution) => {
+  const fpsCandidates = [...new Set([
+    ...CAMERA_FPS_OPTIONS,
+    device?.maxFps ? Math.round(device.maxFps) : 0,
+    device?.defaultFps ? Math.round(device.defaultFps) : 0,
+  ])].filter((fps) => fps > 0).sort((a, b) => a - b);
+  const profiles = cameraResolutionCandidates(device).flatMap((resolution) => {
     const width = portrait ? resolution.height : resolution.width;
     const height = portrait ? resolution.width : resolution.height;
-    return CAMERA_FPS_OPTIONS.map((fps) => ({ width, height, fps }));
+    return fpsCandidates.map((fps) => ({ width, height, fps }));
   });
   const maxLongSide = device && device.maxWidth && device.maxHeight ? Math.max(device.maxWidth, device.maxHeight) : 0;
   const maxShortSide = device && device.maxWidth && device.maxHeight ? Math.min(device.maxWidth, device.maxHeight) : 0;

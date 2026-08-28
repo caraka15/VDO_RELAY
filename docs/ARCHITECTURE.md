@@ -68,8 +68,11 @@ src/lib/mediamtx-webrtc-reader.js
 ### Capture semantics
 
 `getUserMedia` memakai `width`, `height`, `frameRate`, dan `resizeMode: none`
-dengan constraint `exact`. Preflight mencoba kandidat satu per satu dan hanya
+dengan constraint `exact`. Preflight mencoba preset umum serta ukuran/FPS
+default dan maksimum yang dilaporkan kamera satu per satu, lalu hanya
 menampilkan kombinasi yang menghasilkan `getSettings()` sesuai permintaan.
+Ukuran native non-preset, misalnya 2304×1728, tetap dapat dipakai bila lolos
+uji.
 
 Dimensi track kamera adalah dimensi final yang dikirim. Tidak ada scaling,
 canvas, padding, black bar, atau rotate pada output. CSS rotate di `LiveView`
@@ -220,7 +223,7 @@ Path defaults:
 
 ```yaml
 record: false
-maxReaders: 1
+maxReaders: 10
 recordPath: /data/recordings/%path/%Y-%m-%d_%H-%M-%S-%f
 recordFormat: fmp4
 recordPartDuration: 1s
@@ -288,10 +291,12 @@ sebagai cap. WebRTC boleh memilih bitrate aktual di bawah cap karena congestion
 control, scene, atau codec. Tidak ada controller yang menurunkan target setiap
 beberapa detik dan tidak ada floor buatan.
 
-Backend menghitung `receivedBitrateKbps` dari delta `bytesReceived` MediaMTX
-antar polling. Angka rendah tidak otomatis berarti encoder rusak. Status error
-ditentukan dari status path/connection dan error WHIP, bukan dari satu sample
-bitrate.
+Backend menghitung `receivedBitrateKbps` dari delta `inboundBytes` MediaMTX
+antar polling. Angka ini adalah estimasi data yang masuk ke MediaMTX, bukan
+target bitrate dan bukan hasil speedtest. Angka rendah tidak otomatis berarti
+encoder rusak; scene sederhana dan congestion control dapat membuat bitrate
+aktual berada di bawah cap. Status error ditentukan dari status
+path/connection dan error WHIP, bukan dari satu sample bitrate.
 
 ## 11. Security
 
@@ -302,7 +307,8 @@ bitrate.
 - `/player` sengaja dapat di-iframe dan hanya membuka stream dengan read token.
 - Referrer policy `no-referrer`; SRT URL tidak dikirim ke analytics.
 - MediaMTX control/metrics/playback loopback-only.
-- `maxReaders: 1` membatasi biaya outbound per job.
+- `maxReaders: 10` memberi ruang untuk OBS, player WHEP, dan pembaca lain per
+  job. Nilai ini adalah gabungan semua protokol reader, bukan kuota SRT saja.
 
 ## 12. Verifikasi
 

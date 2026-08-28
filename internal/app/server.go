@@ -222,14 +222,11 @@ func (input createStreamRequest) validate() error {
 	if input.AudioCodec != "opus" {
 		return errors.New("audioCodec must be opus for browser WebRTC")
 	}
-	validSize := (input.Width == 1920 && input.Height == 1080) || (input.Width == 1080 && input.Height == 1920) ||
-		(input.Width == 1280 && input.Height == 720) || (input.Width == 720 && input.Height == 1280) ||
-		(input.Width == 854 && input.Height == 480) || (input.Width == 480 && input.Height == 854)
-	if !validSize {
-		return errors.New("unsupported resolution")
+	if input.Width < 160 || input.Height < 160 || input.Width > 7680 || input.Height > 7680 || input.Width%2 != 0 || input.Height%2 != 0 {
+		return errors.New("resolution must be even and between 160 and 7680 pixels")
 	}
-	if input.FPS != 24 && input.FPS != 30 && input.FPS != 60 {
-		return errors.New("unsupported fps")
+	if input.FPS < 1 || input.FPS > 120 {
+		return errors.New("fps must be between 1 and 120")
 	}
 	if input.MaxBitrateKbps < 500 || input.MaxBitrateKbps > 12000 {
 		return errors.New("max bitrate must be between 500 and 12000 kbps")
@@ -587,10 +584,10 @@ func (a *App) handleStreamStats(w http.ResponseWriter, r *http.Request, id strin
 		now := time.Now()
 		a.statsMu.Lock()
 		previous, exists := a.stats[id]
-		a.stats[id] = statsSample{bytes: mediaStats.BytesReceived, at: now}
+		a.stats[id] = statsSample{bytes: mediaStats.InboundBytes, at: now}
 		a.statsMu.Unlock()
-		if exists && mediaStats.BytesReceived >= previous.bytes && now.After(previous.at) {
-			value := int(float64(mediaStats.BytesReceived-previous.bytes) * 8 / now.Sub(previous.at).Seconds() / 1000)
+		if exists && mediaStats.InboundBytes >= previous.bytes && now.After(previous.at) {
+			value := int(float64(mediaStats.InboundBytes-previous.bytes) * 8 / now.Sub(previous.at).Seconds() / 1000)
 			received = &value
 		}
 	}
