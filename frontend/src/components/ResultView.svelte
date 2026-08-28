@@ -8,7 +8,7 @@
   export let targetBitrateKbps = 0;
   export let publisherStatus: "ready" | "connecting" | "live" | "error" = "ready";
   export let onBack: () => void;
-  export let onStop: () => void;
+  export let onStop: () => void | Promise<boolean>;
 
   type CopyTarget = "srt" | "player" | "embed" | "";
   let copied: CopyTarget = "";
@@ -102,7 +102,7 @@
       <section class="panel p-5" aria-labelledby="embed-heading">
         <div class="mb-5 flex items-center gap-2 text-[var(--accent)]"><Code2 size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">EMBED PLAYER</span></div>
         <h2 id="embed-heading" class="text-xl font-extrabold">Bagikan player</h2>
-        <p class="mt-2 text-sm leading-6 text-[var(--muted)]">Link ini membuka player MediaMTX. Token berada di URL dan otomatis tidak berlaku setelah stream di-stop.</p>
+        <p class="mt-2 text-sm leading-6 text-[var(--muted)]">Link ini membuka player MediaMTX. Token berada di URL dan dicabut saat job dihapus.</p>
         <label class="mt-5 block text-xs font-bold uppercase tracking-[0.1em] text-[var(--faint)]" for="player-url">Player link</label>
         <textarea id="player-url" class="field mono mt-2 min-h-[86px] w-full resize-y p-3 text-xs leading-5" readonly>{playerUrl || "Link belum tersedia"}</textarea>
         <div class="mt-3 grid gap-2 sm:grid-cols-2">

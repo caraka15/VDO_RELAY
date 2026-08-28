@@ -5,6 +5,7 @@
     APIError,
     changePassword,
     createStream,
+    deleteStream,
     deleteRecording,
     getSession,
     getStream,
@@ -242,7 +243,7 @@
       publisherError = "";
       liveStats = null;
       page = "live";
-      await handlePublishStart();
+      startStatsPolling();
     } catch (error) {
       setupError = errorMessage(error, "Job stream belum bisa dibuat.");
     } finally {
@@ -268,7 +269,7 @@
       if (codecs.length === 0 || audioCodecs.length === 0) await loadCapabilities();
       const stream = await getStream(summary.id);
       if (!stream.publishUrl || !stream.publishToken || !stream.srtUrl) {
-        throw new Error("Job ini sudah ditutup dan tidak dapat digunakan lagi.");
+        throw new Error("URL job tidak tersedia. Hapus job ini lalu buat job baru.");
       }
       cleanupLive();
       liveStream = stream;
@@ -371,27 +372,6 @@
     }
   }
 
-  function setPortraitMode(portraitMode: boolean) {
-    if (!preparedInput || !liveStream || publishBusy) return;
-    preparedInput = { ...preparedInput, portraitMode };
-    liveStream = { ...liveStream, portraitMode };
-    captureSession?.setPortraitMode(portraitMode);
-    if (!captureSession) {
-      verifiedProfile = null;
-      publisherStatus = "ready";
-      publisherError = "";
-    }
-  }
-
-  function setProfile(width: number, height: number, fps: number) {
-    if (!preparedInput || !liveStream || publishBusy || publisher || captureSession) return;
-    preparedInput = { ...preparedInput, width, height, fps };
-    liveStream = { ...liveStream, width, height, fps };
-    verifiedProfile = null;
-    publisherStatus = "ready";
-    publisherError = "";
-  }
-
   function setSource(deviceId: string, audioDeviceId: string) {
     if (!preparedInput || !liveStream || publishBusy || publisher || captureSession) return;
     preparedInput = { ...preparedInput, deviceId: deviceId || undefined, audioDeviceId: audioDeviceId || undefined };
@@ -420,7 +400,7 @@
     }
   }
 
-  function stopRelay() {
+  function stopLocalRelay() {
     if (statsTimer !== null) window.clearInterval(statsTimer);
     statsTimer = null;
     stopAdaptive?.();
@@ -440,23 +420,37 @@
     publishBusy = false;
   }
 
-  async function closeJob() {
-    if (!liveStream || !window.confirm("Tutup job ini? URL OBS dan token akan dicabut permanen.")) return;
+  async function stopRelay() {
     const id = liveStream?.id;
-    cleanupLive();
-    page = "dashboard";
-    if (id) {
-      try {
-        await stopStream(id);
-      } catch (error) {
-        dashboardError = errorMessage(error, "Relay lokal berhenti, tetapi job server belum berhasil ditutup.");
-      }
+    stopLocalRelay();
+    if (!id) return true;
+    try {
+      await stopStream(id);
+      if (liveStream?.id === id) liveStream = { ...liveStream, status: "stopped" };
+      return true;
+    } catch (error) {
+      publisherStatus = "error";
+      publisherError = errorMessage(error, "Relay lokal berhenti, tetapi status server belum berhasil dihentikan.");
+      return false;
     }
+  }
+
+  async function leaveLive() {
+    if (!liveStream) {
+      page = "dashboard";
+      return;
+    }
+    if (!(await stopRelay())) return;
+    liveStream = null;
+    preparedInput = null;
+    liveStats = null;
+    verifiedProfile = null;
+    page = "dashboard";
     await refreshDashboard();
   }
 
   function cleanupLive() {
-    stopRelay();
+    stopLocalRelay();
     liveStream = null;
     preparedInput = null;
     liveStats = null;
@@ -484,7 +478,19 @@
     }
   }
 
+  async function handleDeleteStream(stream: Stream) {
+    if (!window.confirm(`Hapus job ${stream.path}? URL OBS dan token akan dicabut permanen. File recording tidak ikut dihapus.`)) return;
+    dashboardError = "";
+    try {
+      await deleteStream(stream.id);
+      streams = streams.filter((item) => item.id !== stream.id);
+    } catch (error) {
+      dashboardError = errorMessage(error, "Job stream belum bisa dihapus.");
+    }
+  }
+
   async function handleLogout() {
+    if (liveStream) await stopRelay();
     cleanupLive();
     try {
       await logout();
@@ -518,7 +524,7 @@
 {:else if page === "result" && liveStream}
   <ResultView stream={liveStream} stats={liveStats} {publisherStatus} {targetBitrateKbps} onBack={() => (page = "live")} onStop={stopRelay} />
 {:else if page === "live" && liveStream}
-  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} {cameraDevices} {microphoneDevices} deviceId={preparedInput?.deviceId || ""} audioDeviceId={preparedInput?.audioDeviceId || ""} stats={liveStats} {publisherStatus} {publisherError} {targetBitrateKbps} {copied} starting={publishBusy} onStart={handlePublishStart} onProfile={setProfile} onPortraitMode={setPortraitMode} onSource={setSource} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onCloseJob={closeJob} />
+  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} {cameraDevices} {microphoneDevices} deviceId={preparedInput?.deviceId || ""} audioDeviceId={preparedInput?.audioDeviceId || ""} stats={liveStats} {publisherStatus} {publisherError} {targetBitrateKbps} {copied} starting={publishBusy} onStart={handlePublishStart} onSource={setSource} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onLeaveHome={leaveLive} />
 {:else}
-  <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onOpenStream={handleOpenStream} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
+  <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onOpenStream={handleOpenStream} onDeleteStream={handleDeleteStream} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
 {/if}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -85,6 +86,100 @@ func TestReusableStreamTokens(t *testing.T) {
 	defer restarted.Close()
 	if publish != restarted.streamToken("publish", "stream-1") {
 		t.Fatal("stream token changed after backend restart")
+	}
+}
+
+func TestReusableStreamLifecycle(t *testing.T) {
+	deleteCalls := 0
+	mediaAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalls++
+			if deleteCalls == 3 {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+		}
+		if r.Method != http.MethodDelete && r.Method != http.MethodPatch {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer mediaAPI.Close()
+
+	application, err := New(Config{DataDir: t.TempDir(), ControlURL: mediaAPI.URL, MaxActiveStreams: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer application.Close()
+
+	streamID := "reusable-lifecycle"
+	pathName := "vdo-reusable-lifecycle"
+	publishToken := application.streamToken("publish", streamID)
+	readToken := application.streamToken("read", streamID)
+	_, err = application.db.Exec(`INSERT INTO streams (id, path, status, codec, audio_codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at) VALUES (?, ?, 'ready', 'h264', 'opus', 1280, 720, 30, 4000, 4000, 0, 1, 0, ?, ?, ?)`, streamID, pathName, streamTokenHash(publishToken), streamTokenHash(readToken), time.Now().UTC().Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stop := httptest.NewRecorder()
+	application.handleStopStream(stop, httptest.NewRequest(http.MethodPost, "/api/streams/"+streamID+"/stop", nil), streamID)
+	if stop.Code != http.StatusOK {
+		t.Fatalf("stop status = %d, body = %s", stop.Code, stop.Body.String())
+	}
+	var publishHash, readHash string
+	if err := application.db.QueryRow(`SELECT publish_token_hash, read_token_hash FROM streams WHERE id = ?`, streamID).Scan(&publishHash, &readHash); err != nil {
+		t.Fatal(err)
+	}
+	if !tokenMatches(publishHash, publishToken) || !tokenMatches(readHash, readToken) {
+		t.Fatal("stopping a stream revoked its reusable tokens")
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("stop media delete calls = %d, want 1", deleteCalls)
+	}
+
+	session, err := application.createSession(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := httptest.NewRequest(http.MethodGet, "/api/streams/"+streamID, nil)
+	get.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	getResult := httptest.NewRecorder()
+	application.publicHandler.ServeHTTP(getResult, get)
+	if getResult.Code != http.StatusOK {
+		t.Fatalf("reopen status = %d, body = %s", getResult.Code, getResult.Body.String())
+	}
+	var reopened streamResponse
+	if err := json.Unmarshal(getResult.Body.Bytes(), &reopened); err != nil {
+		t.Fatal(err)
+	}
+	if reopened.PublishToken != publishToken || reopened.SRTURL == "" {
+		t.Fatalf("stopped stream did not return reusable credentials: %+v", reopened)
+	}
+
+	update := httptest.NewRequest(http.MethodPatch, "/api/streams/"+streamID, strings.NewReader(`{"codec":"h264","audioCodec":"opus","width":1280,"height":720,"fps":30,"maxBitrateKbps":4000,"portraitMode":false,"audioEnabled":true,"record":false}`))
+	updateResult := httptest.NewRecorder()
+	application.handleUpdateStream(updateResult, update, streamID)
+	if updateResult.Code != http.StatusOK {
+		t.Fatalf("reuse update status = %d, body = %s", updateResult.Code, updateResult.Body.String())
+	}
+
+	secondStop := httptest.NewRecorder()
+	application.handleStopStream(secondStop, httptest.NewRequest(http.MethodPost, "/api/streams/"+streamID+"/stop", nil), streamID)
+	if secondStop.Code != http.StatusOK || deleteCalls != 2 {
+		t.Fatalf("second stop status = %d, media delete calls = %d", secondStop.Code, deleteCalls)
+	}
+
+	remove := httptest.NewRecorder()
+	application.handleDeleteStream(remove, httptest.NewRequest(http.MethodDelete, "/api/streams/"+streamID, nil), streamID)
+	if remove.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, body = %s", remove.Code, remove.Body.String())
+	}
+	if _, err := getStream(context.Background(), application.db, streamID); err != sql.ErrNoRows {
+		t.Fatalf("deleted stream lookup error = %v, want sql.ErrNoRows", err)
+	}
+	if deleteCalls != 3 {
+		t.Fatalf("delete path calls = %d, want stop, stop, and idempotent delete", deleteCalls)
 	}
 }
 

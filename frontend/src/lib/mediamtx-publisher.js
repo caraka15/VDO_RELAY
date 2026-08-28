@@ -377,8 +377,15 @@ class MediaMTXMoQPublisher {
     const isHvc = this.#conf.videoCodec.startsWith("hev") || this.#conf.videoCodec.startsWith("hvc");
     const processor = new MediaStreamTrackProcessor({ track: mediaTrack });
     const frameReader = processor.readable.getReader();
+    const transport = this.#wt;
+    if (transport === null) {
+      throw new Error("WebTransport is not connected");
+    }
 
     let groupId = 0n;
+    // ponytail: one FIFO queue per track fixes QUIC completion reordering; add
+    // bounded frame dropping if sustained congestion ever grows this queue.
+    let writeQueue = Promise.resolve();
     let vps = null;
     let sps = null;
     let pps = null;
@@ -427,13 +434,24 @@ class MediaMTXMoQPublisher {
           );
         }
 
-        this.#writeData(
-          trackAlias,
-          groupId++,
-          chunk.timestamp,
-          90000,
-          data,
-        ).catch((err) => this.#handleError(err.message));
+        const currentGroupId = groupId++;
+        writeQueue = writeQueue
+          .then(() => {
+            if (this.#state !== "running" || this.#wt !== transport) return;
+            return this.#writeData(
+              transport,
+              trackAlias,
+              currentGroupId,
+              chunk.timestamp,
+              90000,
+              data,
+            );
+          })
+          .catch((err) => {
+            if (this.#state === "running" && this.#wt === transport) {
+              this.#handleError(err.message);
+            }
+          });
       },
       error: (err) => this.#handleError(`video encoder: ${err.message}`),
     });
@@ -468,23 +486,39 @@ class MediaMTXMoQPublisher {
   async #encodeAudio(mediaTrack, trackAlias) {
     const processor = new MediaStreamTrackProcessor({ track: mediaTrack });
     const frameReader = processor.readable.getReader();
+    const transport = this.#wt;
+    if (transport === null) {
+      throw new Error("WebTransport is not connected");
+    }
     const audioSettings = mediaTrack.getSettings();
     const sampleRate = audioSettings.sampleRate || 48000;
     const channelCount = audioSettings.channelCount || 1;
 
     let groupId = 0n;
+    let writeQueue = Promise.resolve();
 
     this.#audioEncoder = new AudioEncoder({
       output: (chunk) => {
         const data = new Uint8Array(chunk.byteLength);
         chunk.copyTo(data);
-        this.#writeData(
-          trackAlias,
-          groupId++,
-          chunk.timestamp,
-          sampleRate,
-          data,
-        ).catch((err) => this.#handleError(err.message));
+        const currentGroupId = groupId++;
+        writeQueue = writeQueue
+          .then(() => {
+            if (this.#state !== "running" || this.#wt !== transport) return;
+            return this.#writeData(
+              transport,
+              trackAlias,
+              currentGroupId,
+              chunk.timestamp,
+              sampleRate,
+              data,
+            );
+          })
+          .catch((err) => {
+            if (this.#state === "running" && this.#wt === transport) {
+              this.#handleError(err.message);
+            }
+          });
       },
       error: (err) => this.#handleError(`audio encoder: ${err.message}`),
     });
@@ -527,7 +561,7 @@ class MediaMTXMoQPublisher {
     console.log("catalog sent");
   }
 
-  async #writeData(trackAlias, groupId, timestamp, clockrate, payload) {
+  async #writeData(transport, trackAlias, groupId, timestamp, clockrate, payload) {
     const tsType = MediaMTXMoQPublisher.#encodeVarint(0x06n);
     const tsValue = MediaMTXMoQPublisher.#encodeVarint(
       BigInt(Math.round((timestamp * clockrate) / 1000000)),
@@ -538,7 +572,7 @@ class MediaMTXMoQPublisher {
       kv,
     );
 
-    const uniStream = await this.#wt.createUnidirectionalStream();
+    const uniStream = await transport.createUnidirectionalStream();
     const w = uniStream.getWriter();
     await w.write(
       MediaMTXMoQPublisher.#concat(

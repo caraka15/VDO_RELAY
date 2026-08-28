@@ -23,18 +23,32 @@ export type CameraDevice = {
   maxHeight: number;
   maxFps: number;
   zoom: { min: number; max: number; step: number } | null;
+  torch: boolean;
 };
+
+export type CameraProfile = {
+  width: number;
+  height: number;
+  fps: number;
+};
+
+export const CAMERA_RESOLUTIONS = [
+  { label: "1080p", width: 1920, height: 1080 },
+  { label: "720p", width: 1280, height: 720 },
+  { label: "480p", width: 854, height: 480 },
+] as const;
+
+export const CAMERA_FPS_OPTIONS = [24, 30, 60] as const;
 
 export type CaptureSession = {
   sourceStream: MediaStream;
   stream: MediaStream;
-  canvas: HTMLCanvasElement;
+  videoTrack: MediaStreamTrack;
   actualWidth: number;
   actualHeight: number;
   actualFps: number;
   audioTrack: MediaStreamTrack | null;
   getAudioLevel: () => number;
-  setPortraitMode: (portraitMode: boolean) => void;
   stop: () => void;
 };
 
@@ -103,15 +117,91 @@ export async function probeCameraDevices(): Promise<CameraDevice[]> {
       const zoom = capabilities.zoom && finiteNumber(capabilities.zoom.max) !== null
         ? { min: finiteNumber(capabilities.zoom.min) || 1, max: finiteNumber(capabilities.zoom.max) || 1, step: finiteNumber(capabilities.zoom.step) || 0.1 }
         : null;
+      const torch = capabilities.torch === true;
       const facingMode = Array.isArray(capabilities.facingMode) ? capabilities.facingMode[0] || "" : String(capabilities.facingMode || settings.facingMode || "");
-      result.push({ deviceId: device.deviceId, label: device.label || `Kamera ${result.length + 1}`, facingMode, maxWidth, maxHeight, maxFps, zoom });
+      result.push({ deviceId: device.deviceId, label: device.label || `Kamera ${result.length + 1}`, facingMode, maxWidth, maxHeight, maxFps, zoom, torch });
     } catch {
-      result.push({ deviceId: device.deviceId, label: device.label || `Kamera ${result.length + 1}`, facingMode: "", maxWidth: 0, maxHeight: 0, maxFps: 0, zoom: null });
+      result.push({ deviceId: device.deviceId, label: device.label || `Kamera ${result.length + 1}`, facingMode: "", maxWidth: 0, maxHeight: 0, maxFps: 0, zoom: null, torch: false });
     } finally {
       stream?.getTracks().forEach((track) => track.stop());
     }
   }
   return result;
+}
+
+function exactCameraConstraints(profile: CameraProfile, deviceId?: string): MediaTrackConstraints {
+  return {
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    width: { exact: profile.width },
+    height: { exact: profile.height },
+    frameRate: { exact: profile.fps },
+    resizeMode: { exact: "none" },
+  } as MediaTrackConstraints;
+}
+
+type DirectFrameInfo = {
+  width: number;
+  height: number;
+  rotation: number;
+};
+
+async function inspectFirstFrame(track: MediaStreamTrack): Promise<DirectFrameInfo> {
+  const TrackProcessor = (globalThis as any).MediaStreamTrackProcessor;
+  if (!TrackProcessor) throw new Error("MediaStreamTrackProcessor tidak tersedia di browser ini.");
+  const probeTrack = track.clone();
+  const probeProcessor = new TrackProcessor({ track: probeTrack });
+  const probeReader = probeProcessor.readable.getReader();
+  let firstFrame: VideoFrame | null = null;
+  try {
+    const result = await Promise.race([
+      probeReader.read(),
+      new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("Frame kamera pertama tidak masuk.")), 5_000)),
+    ]) as ReadableStreamReadResult<VideoFrame>;
+    if (result.done || !result.value) throw new Error("Frame kamera pertama tidak tersedia.");
+    firstFrame = result.value;
+    return {
+      width: Number(firstFrame.codedWidth || firstFrame.displayWidth || 0),
+      height: Number(firstFrame.codedHeight || firstFrame.displayHeight || 0),
+      rotation: Number((firstFrame as VideoFrame & { rotation?: number }).rotation || 0),
+    };
+  } finally {
+    firstFrame?.close();
+    await probeReader.cancel().catch(() => undefined);
+    probeReader.releaseLock();
+    probeTrack.stop();
+  }
+}
+
+export async function probeCameraProfiles(deviceId: string | undefined, portrait: boolean, device?: CameraDevice): Promise<CameraProfile[]> {
+  const profiles = CAMERA_RESOLUTIONS.flatMap((resolution) => {
+    const width = portrait ? resolution.height : resolution.width;
+    const height = portrait ? resolution.width : resolution.height;
+    return CAMERA_FPS_OPTIONS.map((fps) => ({ width, height, fps }));
+  });
+  const maxLongSide = device && device.maxWidth && device.maxHeight ? Math.max(device.maxWidth, device.maxHeight) : 0;
+  const maxShortSide = device && device.maxWidth && device.maxHeight ? Math.min(device.maxWidth, device.maxHeight) : 0;
+  const candidates = profiles.filter((profile) => !maxLongSide || (Math.max(profile.width, profile.height) <= maxLongSide && Math.min(profile.width, profile.height) <= maxShortSide));
+  const supported: CameraProfile[] = [];
+
+  for (const profile of candidates) {
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: exactCameraConstraints(profile, deviceId), audio: false });
+      const track = stream.getVideoTracks()[0];
+      const settings = track?.getSettings();
+      const actualWidth = finiteNumber(settings?.width) || 0;
+      const actualHeight = finiteNumber(settings?.height) || 0;
+      const actualFps = finiteNumber(settings?.frameRate) || 0;
+      const frame = track ? await inspectFirstFrame(track) : null;
+      if (actualWidth === profile.width && actualHeight === profile.height && actualFps + 1 >= profile.fps && frame?.rotation === 0 && frame.width === profile.width && frame.height === profile.height) supported.push(profile);
+    } catch {
+      // The exact camera mode is not available; keep it out of the choices.
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+    }
+  }
+
+  return supported;
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -188,11 +278,10 @@ export function assertBrowserMediaSupport(audioEnabled = true): void {
 }
 
 export async function openCapture(
-  input: Pick<StartStreamInput, "width" | "height" | "fps" | "audioEnabled" | "portraitMode"> & { deviceId?: string; audioDeviceId?: string },
+  input: Pick<StartStreamInput, "width" | "height" | "fps" | "audioEnabled"> & { deviceId?: string; audioDeviceId?: string },
 ): Promise<CaptureSession> {
   assertBrowserMediaSupport(input.audioEnabled);
-  const videoConstraints: MediaTrackConstraints = {};
-  if (input.deviceId) videoConstraints.deviceId = { exact: input.deviceId };
+  const videoConstraints = exactCameraConstraints({ width: input.width, height: input.height, fps: input.fps }, input.deviceId);
   const audioConstraints: MediaTrackConstraints = {
     echoCancellation: true,
     noiseSuppression: true,
@@ -203,7 +292,7 @@ export async function openCapture(
   let sourceStream: MediaStream;
   try {
     sourceStream = await navigator.mediaDevices.getUserMedia({
-      video: input.deviceId ? videoConstraints : true,
+      video: videoConstraints,
       audio: input.audioEnabled ? audioConstraints : false,
     });
   } catch (error) {
@@ -217,106 +306,26 @@ export async function openCapture(
   }
   const settings = sourceTrack.getSettings();
   const actualFps = finiteNumber(settings.frameRate) || 0;
-
-  const video = document.createElement("video");
-  video.muted = true;
-  video.autoplay = true;
-  video.playsInline = true;
-  video.setAttribute("aria-hidden", "true");
-  video.style.position = "fixed";
-  video.style.width = "1px";
-  video.style.height = "1px";
-  video.style.opacity = "0";
-  video.style.pointerEvents = "none";
-  video.srcObject = sourceStream;
-  document.body.appendChild(video);
+  if (!actualFps || actualFps + 1 < input.fps) {
+    sourceStream.getTracks().forEach((track) => track.stop());
+    throw new Error(`Kamera hanya menghasilkan ${actualFps ? `${Math.round(actualFps * 10) / 10} FPS` : "FPS yang tidak diketahui"}; profile meminta ${input.fps} FPS. Tidak ada fallback.`);
+  }
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
-        resolve();
-        return;
-      }
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("Metadata kamera tidak bisa dibaca."));
-    });
-    await video.play();
+    const frame = await inspectFirstFrame(sourceTrack);
+    if (frame.rotation % 360 !== 0) throw new Error("Browser mengirim orientasi kamera sebagai metadata rotation. Mode direct tanpa canvas tidak dapat menjamin hasil SRT/OBS.");
+    if (frame.width !== input.width || frame.height !== input.height) throw new Error(`Frame kamera aktual ${frame.width} × ${frame.height}, sedangkan profile meminta ${input.width} × ${input.height}. Pilih profile kamera yang sesuai.`);
   } catch (error) {
     sourceStream.getTracks().forEach((track) => track.stop());
-    video.remove();
-    throw new Error(`Preview kamera gagal dimulai: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
   }
 
-  const actualWidth = video.videoWidth || settings.width || 0;
-  const actualHeight = video.videoHeight || settings.height || 0;
-  if (!actualWidth || !actualHeight) {
-    sourceStream.getTracks().forEach((track) => track.stop());
-    video.pause();
-    video.srcObject = null;
-    video.remove();
-    throw new Error("Browser tidak melaporkan resolusi kamera aktual.");
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = input.width;
-  canvas.height = input.height;
-  canvas.setAttribute("role", "img");
-  canvas.setAttribute("aria-label", `Preview output ${input.width} kali ${input.height}`);
-  canvas.style.display = "block";
-  canvas.style.width = "auto";
-  canvas.style.height = "auto";
-  canvas.style.maxWidth = "100%";
-  canvas.style.maxHeight = "100%";
-  const context = canvas.getContext("2d");
-  if (!context || !(canvas as any).captureStream) {
-    sourceStream.getTracks().forEach((track) => track.stop());
-    video.remove();
-    throw new Error("Canvas capture tidak tersedia di browser ini.");
-  }
-
-  let running = true;
-  let portraitMode = input.portraitMode;
-  let animationFrame = 0;
-  let lastDraw = -Infinity;
-  const frameInterval = 1000 / input.fps;
-  const draw = (timestamp: number) => {
-    if (!running) return;
-    if (timestamp - lastDraw >= frameInterval - 1) {
-      lastDraw = timestamp;
-      const sourceWidth = video.videoWidth || actualWidth;
-      const sourceHeight = video.videoHeight || actualHeight;
-      const outputPortrait = canvas.height > canvas.width;
-      const contain = portraitMode !== outputPortrait;
-      const rotate = (sourceHeight > sourceWidth) !== portraitMode;
-      const contentWidth = rotate ? sourceHeight : sourceWidth;
-      const contentHeight = rotate ? sourceWidth : sourceHeight;
-      const scale = contain
-        ? Math.min(canvas.width / contentWidth, canvas.height / contentHeight)
-        : Math.max(canvas.width / contentWidth, canvas.height / contentHeight);
-      context.fillStyle = "#000000";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.save();
-      context.translate(canvas.width / 2, canvas.height / 2);
-      if (rotate) context.rotate(Math.PI / 2);
-      context.drawImage(video, -(sourceWidth * scale) / 2, -(sourceHeight * scale) / 2, sourceWidth * scale, sourceHeight * scale);
-      context.restore();
-    }
-    animationFrame = requestAnimationFrame(draw);
-  };
-  animationFrame = requestAnimationFrame(draw);
-
-  const outputStream = (canvas as any).captureStream(input.fps) as MediaStream;
   const audioTracks = input.audioEnabled ? sourceStream.getAudioTracks() : [];
   if (input.audioEnabled && audioTracks.length === 0) {
     sourceStream.getTracks().forEach((track) => track.stop());
-    outputStream.getTracks().forEach((track) => track.stop());
-    video.pause();
-    video.srcObject = null;
-    video.remove();
-    canvas.remove();
     throw new Error("Mikrofon tidak menghasilkan audio track. Pilih input audio lain atau matikan audio.");
   }
-  const stream = new MediaStream([...outputStream.getVideoTracks(), ...audioTracks]);
+  const stream = sourceStream;
 
   let audioContext: AudioContext | null = null;
   let audioAnalyser: AnalyserNode | null = null;
@@ -340,9 +349,9 @@ export async function openCapture(
   return {
     sourceStream,
     stream,
-    canvas,
-    actualWidth,
-    actualHeight,
+    videoTrack: sourceTrack,
+    actualWidth: input.width,
+    actualHeight: input.height,
     actualFps,
     audioTrack: audioTracks[0] || null,
     getAudioLevel: () => {
@@ -355,20 +364,9 @@ export async function openCapture(
       }
       return Math.min(1, Math.sqrt(total / audioData.length) * 4);
     },
-    setPortraitMode: (next) => {
-      portraitMode = next;
-    },
     stop: () => {
-      running = false;
-      cancelAnimationFrame(animationFrame);
       stream.getTracks().forEach((track) => track.stop());
-      outputStream.getTracks().forEach((track) => track.stop());
-      sourceStream.getTracks().forEach((track) => track.stop());
-      video.pause();
-      video.srcObject = null;
-      video.remove();
       void audioContext?.close();
-      canvas.remove();
     },
   };
 }

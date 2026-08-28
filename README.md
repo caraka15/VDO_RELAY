@@ -1,8 +1,8 @@
 # VDO Relay
 
 VDO Relay adalah private camera relay untuk Android Chrome dan desktop Chrome.
-Browser melakukan capture, framing, dan encode H.264/H.265 pada output
-landscape atau portrait yang dikunci per job. MediaMTX
+Browser melakukan capture langsung dari kamera dan encode H.264/H.265 pada
+orientasi, resolusi, dan FPS exact yang dikunci per job. MediaMTX
 menerima hasil encode tersebut lalu menyediakan output SRT untuk OBS tanpa
 server-side transcoding.
 
@@ -152,25 +152,30 @@ Setup tidak mengubah UFW secara otomatis untuk menghindari mengunci akses SSH.
 1. Buka `https://app.example.com` dan login dengan `admin` / `admin`.
 2. Ganti password saat diminta.
 3. Buka form stream baru. Browser membaca daftar kamera, microphone, dan codec.
-4. Pilih H.264/H.265, codec audio, resolusi/FPS output, bitrate maksimum,
-   bentuk output awal di mobile, dan recording.
-5. Tekan **Create stream**. Browser hanya memeriksa encoder output sebelum job
-   dibuat; kamera belum dipaksa mengikuti resolusi/FPS output.
-6. Setelah job dibuat, halaman kontrol otomatis membuka kamera/mikrofon default
-   dan mencoba memulai relay. Jika input gagal, job tetap tersedia untuk retry.
-7. Untuk mengganti resolusi/FPS, tekan **Stop relay**, ubah profile, lalu Start
-   lagi. Path, token read, dan URL OBS tidak berubah.
-8. Gunakan **Close job** hanya ketika URL OBS memang ingin dicabut permanen.
-9. Job yang masih terbuka dapat dibuka kembali dari dashboard setelah refresh.
+4. Pilih orientasi, kamera, H.264/H.265, codec audio, resolusi/FPS kamera,
+   bitrate maksimum, dan recording.
+5. Tekan **Create stream**. Browser menguji kombinasi kamera exact dan encoder
+   sebelum job dibuat. Mode yang tidak terbukti tidak muncul sebagai pilihan.
+6. Setelah job dibuat, halaman kontrol berada dalam keadaan standby. Tekan
+   **Start** untuk membuka kamera/mikrofon dan memulai relay.
+7. Profile resolusi/FPS tidak diubah dari halaman live. Buat job lain jika mode
+   berbeda diperlukan; job dan URL OBS lama tetap reusable.
+8. Gunakan **Kembali ke Home** untuk menutup halaman live; relay dihentikan,
+   tetapi job dan URL OBS tetap tersimpan.
+9. Job stopped maupun live dapat dibuka kembali dari dashboard kapan saja.
+10. Gunakan **Delete** di dashboard hanya ketika job dan token OBS memang ingin
+    dihapus permanen.
 
 Label codec pada setup adalah hasil probe encoder browser, bukan klaim hardware
-encoder. Resolusi/FPS yang dipilih adalah output encoder. Capability kamera
-ditampilkan terpisah per device (ukuran maksimum, FPS maksimum, dan zoom API
-bila tersedia), lalu source dibuka tanpa dipaksa menyamai target output.
+encoder. Resolusi/FPS yang dipilih adalah mode kamera sekaligus ukuran encoder.
+Setiap kombinasi diuji dengan constraint exact dan `resizeMode: none`; source
+dibuka tanpa canvas, scaling, pacing, atau rotate pixel.
 
-Pada mobile, output orientation dikunci saat job dibuat. Framing dapat diubah
-manual tanpa mengubah ukuran file; tombol Unlock mengaktifkan pembacaan gyro
-untuk auto landscape/portrait.
+Pada mobile, halaman live menjadi satu viewfinder full-screen tanpa scroll dengan
+bottom navigation seperti aplikasi kamera. Preview memakai source kamera aktual;
+source landscape diputar melalui CSS agar sisi kanannya berada di atas, sedangkan
+source portrait tetap portrait. Transform itu hanya untuk preview dan tidak masuk
+ke output OBS. Tidak ada tombol rotate, framing, atau gyro auto-rotate.
 
 Halaman Result menyediakan:
 
@@ -200,8 +205,8 @@ srt://media.example.com:8890?streamid=read:<path>:user:<token>&latency=2000000&p
 ```
 
 Token read tersedia kembali bagi operator yang login dan tetap sama ketika relay
-di-Stop/Start. Token baru dicabut saat **Close job**. Jangan membagikan URL
-tersebut sembarangan.
+di-Stop/Start atau halaman ditutup. Token dicabut saat **Delete**. Jangan
+membagikan URL tersebut sembarangan.
 
 ### Health check
 
@@ -243,7 +248,7 @@ setup.sh                             setup deployment Ubuntu satu perintah
 update.sh                            pull aman dan rebuild deployment
 frontend/src/App.svelte              flow dan state halaman
 frontend/src/components/             Login, Setup, Live, Result, Dashboard
-frontend/src/lib/media.ts            kamera, canvas, WebCodecs, bitrate adaptif
+frontend/src/lib/media.ts            kamera direct, preflight, WebCodecs, bitrate adaptif
 internal/app/                        Go API, auth, SQLite, MediaMTX control
 deploy/nginx/                        vhost HTTP awal untuk Certbot
 deploy/certbot/                      renewal hook certificate

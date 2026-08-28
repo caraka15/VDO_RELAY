@@ -147,6 +147,9 @@ export const getStreamStats = (id: string) =>
 export const stopStream = (id: string) =>
   request<Stream>(`/api/streams/${encodeURIComponent(id)}/stop`, { method: "POST" });
 
+export const deleteStream = (id: string) =>
+  request<void>(`/api/streams/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 export const listRecordings = async () => (await request<Recording[] | null>("/api/recordings")) ?? [];
 
 export const deleteRecording = (id: string) =>

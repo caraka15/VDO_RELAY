@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -126,7 +127,12 @@ func (m *mediaManager) addPath(ctx context.Context, path string, record bool) er
 }
 
 func (m *mediaManager) deletePath(ctx context.Context, path string) error {
-	return m.control(ctx, http.MethodDelete, "/v3/config/paths/delete/"+url.PathEscape(path), nil)
+	err := m.control(ctx, http.MethodDelete, "/v3/config/paths/delete/"+url.PathEscape(path), nil)
+	var apiErr mediaControlError
+	if errors.As(err, &apiErr) && apiErr.status == http.StatusNotFound {
+		return nil
+	}
+	return err
 }
 
 func (m *mediaManager) patchPath(ctx context.Context, path string, record bool) error {
@@ -164,9 +170,18 @@ func (m *mediaManager) control(ctx context.Context, method, endpoint string, pay
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("MediaMTX control API returned %s", response.Status)
+		return mediaControlError{status: response.StatusCode, text: response.Status}
 	}
 	return nil
+}
+
+type mediaControlError struct {
+	status int
+	text   string
+}
+
+func (e mediaControlError) Error() string {
+	return fmt.Sprintf("MediaMTX control API returned %s", e.text)
 }
 
 type mediaPathStats struct {

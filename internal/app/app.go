@@ -254,6 +254,22 @@ func (a *App) streamToken(purpose, id string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
+func (a *App) ensureStreamTokens(ctx context.Context, stream *streamRecord) error {
+	publishToken := a.streamToken("publish", stream.ID)
+	readToken := a.streamToken("read", stream.ID)
+	publishHash := streamTokenHash(publishToken)
+	readHash := streamTokenHash(readToken)
+	if stream.PublishTokenHash == publishHash && stream.ReadTokenHash == readHash {
+		return nil
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE streams SET publish_token_hash = ?, read_token_hash = ? WHERE id = ?`, publishHash, readHash, stream.ID); err != nil {
+		return err
+	}
+	stream.PublishTokenHash = publishHash
+	stream.ReadTokenHash = readHash
+	return nil
+}
+
 func openStreamStatus(status string) bool {
 	return status == "ready" || status == "connecting" || status == "live"
 }

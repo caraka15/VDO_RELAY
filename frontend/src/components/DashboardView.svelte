@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, ArrowRight, KeyRound, LogOut, Plus, RefreshCw, Server, ShieldCheck, Wifi } from "@lucide/svelte";
+  import { Activity, ArrowRight, KeyRound, LogOut, Plus, RefreshCw, Server, ShieldCheck, Trash2, Wifi } from "@lucide/svelte";
   import type { Recording, Session, Stream } from "../lib/api";
   import RecordingsList from "./RecordingsList.svelte";
 
@@ -11,6 +11,7 @@
   export let error = "";
   export let onNewStream: () => void;
   export let onOpenStream: (stream: Stream) => void;
+  export let onDeleteStream: (stream: Stream) => void;
   export let onRefresh: () => void;
   export let onLogout: () => void;
   export let onPassword: () => void;
@@ -58,7 +59,7 @@
     <section class="mb-7 grid gap-4 sm:grid-cols-3" aria-label="Ringkasan server">
       <div class="panel p-5"><div class="mb-4 flex items-center justify-between"><span class="text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Open jobs</span><Activity size={18} class="text-[var(--accent)]" /></div><p class="mono text-3xl font-extrabold">{activeStreams.length}<span class="text-base text-[var(--faint)]"> / 8</span></p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">Job ready dan live</p></div>
       <div class="panel p-5"><div class="mb-4 flex items-center justify-between"><span class="text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Transport</span><Wifi size={18} class="text-[var(--success)]" /></div><p class="text-2xl font-extrabold text-[var(--success)]">MoQ → SRT</p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">No server transcoding</p></div>
-      <div class="panel p-5"><div class="mb-4 flex items-center justify-between"><span class="text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Security</span><ShieldCheck size={18} class="text-[var(--warning)]" /></div><p class="text-2xl font-extrabold">Tokenized</p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">Token dicabut saat job ditutup</p></div>
+      <div class="panel p-5"><div class="mb-4 flex items-center justify-between"><span class="text-xs font-bold uppercase tracking-[0.12em] text-[var(--faint)]">Security</span><ShieldCheck size={18} class="text-[var(--warning)]" /></div><p class="text-2xl font-extrabold">Tokenized</p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">Token tetap sampai job dihapus</p></div>
     </section>
 
     <section class="panel mb-7" aria-labelledby="streams-heading">
@@ -68,13 +69,12 @@
       {:else}
         <div class="divide-y divide-[var(--border)]">
           {#each streams as stream}
-            <div class="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto_auto_auto] sm:items-center sm:px-6">
+            <div class="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto_auto_auto_auto] sm:items-center sm:px-6">
               <div class="min-w-0"><p class="mono truncate text-sm font-extrabold">{stream.path}</p><p class="mt-1 text-xs font-semibold text-[var(--muted)]">{stream.codec.toUpperCase()} · {stream.width}×{stream.height} · {stream.fps} FPS · dibuat {new Date(stream.createdAt).toLocaleString("id-ID")}</p></div>
               <span class="inline-flex w-fit items-center gap-2 border px-2.5 py-1 text-xs font-extrabold" class:border-[#3c7154]={stream.status === "live"} class:bg-[#1b3026]={stream.status === "live"} class:text-[var(--success)]={stream.status === "live"} class:border-[#705c31]={stream.status === "connecting"} class:bg-[#332d1d]={stream.status === "connecting"} class:text-[var(--warning)]={stream.status === "connecting"} class:border-[var(--accent)]={stream.status === "ready"} class:text-[var(--accent)]={stream.status === "ready"} class:border-[var(--border)]={stream.status === "stopped" || stream.status === "failed"} class:text-[var(--muted)]={stream.status === "stopped" || stream.status === "failed"}><span class="status-dot"></span>{stream.status.toUpperCase()}</span>
               <span class="mono text-xs font-bold text-[var(--muted)]">{stream.record ? "RECORD ON" : "LIVE ONLY"}</span>
-              {#if stream.status === "ready" || stream.status === "connecting" || stream.status === "live"}
-                <button class="button-secondary inline-flex items-center justify-center gap-2" type="button" on:click={() => onOpenStream(stream)}><span>Open</span><ArrowRight size={17} /></button>
-              {/if}
+              <button class="button-secondary inline-flex items-center justify-center gap-2" type="button" on:click={() => onOpenStream(stream)}><span>Open</span><ArrowRight size={17} /></button>
+              <button class="button-danger inline-flex items-center justify-center gap-2" type="button" on:click={() => onDeleteStream(stream)}><Trash2 size={17} /><span>Delete</span></button>
             </div>
           {/each}
         </div>

@@ -402,6 +402,10 @@ func (a *App) handleStreamRoute(w http.ResponseWriter, r *http.Request) {
 		a.handleStopStream(w, r, parts[0])
 		return
 	}
+	if len(parts) == 1 && r.Method == http.MethodDelete {
+		a.handleDeleteStream(w, r, parts[0])
+		return
+	}
 	if len(parts) == 1 && r.Method == http.MethodPatch {
 		a.handleUpdateStream(w, r, parts[0])
 		return
@@ -416,8 +420,8 @@ func (a *App) handleStreamRoute(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not load stream", "database_error")
 			return
 		}
-		if !openStreamStatus(stream.Status) {
-			writeJSON(w, http.StatusOK, a.publicStreamResponse(stream))
+		if err := a.ensureStreamTokens(r.Context(), &stream); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not restore stream token", "database_error")
 			return
 		}
 		writeJSON(w, http.StatusOK, a.privateStreamResponse(stream, r))
@@ -455,15 +459,15 @@ func (a *App) handleUpdateStream(w http.ResponseWriter, r *http.Request, id stri
 		writeError(w, http.StatusInternalServerError, "could not load stream", "database_error")
 		return
 	}
-	if !openStreamStatus(stream.Status) {
-		writeError(w, http.StatusConflict, "closed stream cannot be updated", "stream_closed")
+	if err := a.ensureStreamTokens(r.Context(), &stream); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not restore stream token", "database_error")
 		return
 	}
 	if err := a.media.ensurePath(r.Context(), stream.Path, input.Record); err != nil {
 		writeError(w, http.StatusBadGateway, "could not update media path", "media_config_error")
 		return
 	}
-	_, err = a.db.ExecContext(r.Context(), `UPDATE streams SET status = 'ready', codec = ?, audio_codec = ?, width = ?, height = ?, fps = ?, max_bitrate_kbps = ?, current_bitrate_kbps = ?, portrait_mode = ?, audio_enabled = ?, record = ?, error = '' WHERE id = ?`, input.Codec, input.AudioCodec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), id)
+	_, err = a.db.ExecContext(r.Context(), `UPDATE streams SET status = 'ready', stopped_at = NULL, codec = ?, audio_codec = ?, width = ?, height = ?, fps = ?, max_bitrate_kbps = ?, current_bitrate_kbps = ?, portrait_mode = ?, audio_enabled = ?, record = ?, error = '' WHERE id = ?`, input.Codec, input.AudioCodec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update stream", "database_error")
 		return
@@ -479,6 +483,7 @@ func (a *App) handleUpdateStream(w http.ResponseWriter, r *http.Request, id stri
 	stream.PortraitMode = input.PortraitMode
 	stream.AudioEnabled = input.AudioEnabled
 	stream.Record = input.Record
+	stream.StoppedAt = nil
 	stream.Error = ""
 	writeJSON(w, http.StatusOK, a.privateStreamResponse(stream, r))
 }
@@ -504,21 +509,49 @@ func (a *App) handleStopStream(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	now := time.Now().UTC()
-	_, err = a.db.Exec(`UPDATE streams SET status = 'stopped', stopped_at = ?, publish_token_hash = '', read_token_hash = '' WHERE id = ?`, now.Unix(), id)
+	_, err = a.db.Exec(`UPDATE streams SET status = 'stopped', stopped_at = ? WHERE id = ?`, now.Unix(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not stop stream", "database_error")
 		return
 	}
 	stream.Status = "stopped"
 	stream.StoppedAt = &now
-	stream.PublishTokenHash = ""
-	stream.ReadTokenHash = ""
 	mediaErr := a.media.deletePath(r.Context(), stream.Path)
 	if mediaErr != nil {
-		writeError(w, http.StatusBadGateway, "stream token revoked, but media path cleanup failed", "media_config_error")
+		writeError(w, http.StatusBadGateway, "stream stopped, but media path cleanup failed", "media_config_error")
 		return
 	}
 	writeJSON(w, http.StatusOK, a.publicStreamResponse(stream))
+}
+
+func (a *App) handleDeleteStream(w http.ResponseWriter, r *http.Request, id string) {
+	if !sameOrigin(r) {
+		writeError(w, http.StatusForbidden, "request origin is not allowed", "origin_denied")
+		return
+	}
+	a.streamMu.Lock()
+	defer a.streamMu.Unlock()
+	stream, err := getStream(r.Context(), a.db, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "stream not found", "not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load stream", "database_error")
+		return
+	}
+	if err := a.media.deletePath(r.Context(), stream.Path); err != nil {
+		writeError(w, http.StatusBadGateway, "could not remove media path; stream was not deleted", "media_config_error")
+		return
+	}
+	if _, err := a.db.ExecContext(r.Context(), `DELETE FROM streams WHERE id = ?`, id); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not delete stream", "database_error")
+		return
+	}
+	a.statsMu.Lock()
+	delete(a.stats, id)
+	a.statsMu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *App) handleStreamStats(w http.ResponseWriter, r *http.Request, id string) {

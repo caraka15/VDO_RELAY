@@ -75,21 +75,27 @@ deployment semuanya berada dalam satu container.
    `AudioEncoder.isConfigSupported()` untuk ukuran/FPS output yang dipilih.
 2. Hanya jika output preflight lulus, Svelte memanggil `POST /api/streams`;
    backend membuat path, token stabil, SRT URL, dan player URL.
-3. Halaman kontrol otomatis meminta kamera/microphone default setelah job dibuat.
-   Kegagalan input tidak menghapus job; tombol Start dapat dicoba lagi.
-4. Capability setiap kamera dibaca dari `MediaTrackCapabilities` tanpa
-   menjadikan resolusi/FPS kamera sebagai target encoder.
-5. Video element yang sudah `play()` membaca kamera; frame digambar ke canvas
-   output berukuran tetap sesuai orientation job.
-6. Canvas memutar frame 90° bila framing yang dipilih berbeda dari orientasi
-   sumber, lalu menghasilkan black bar bila framing berbeda dari output.
-7. Publisher memakai `MediaStreamTrackProcessor` untuk membaca frame final dari
-   canvas dan menjaga black bar saat framing berbeda dari orientation output.
-8. `VideoEncoder` menghasilkan H.264 atau H.265 pada ukuran/FPS output.
-9. `AudioEncoder` menghasilkan codec audio yang dipilih bila audio aktif.
-10. Encoded chunks dikirim melalui publisher Media-over-QUIC yang divendor dari
+3. Halaman setup meminta izin kamera/microphone dan menguji mode kamera exact
+   berdasarkan orientasi, resolusi, dan FPS yang dipilih.
+4. Hanya mode kamera yang menghasilkan `getSettings()` sesuai profile yang
+   ditampilkan. `resizeMode: none` mencegah crop-and-scale dari track.
+5. Setelah job dibuat, halaman kontrol tetap standby sampai operator menekan
+   Start. Start meminta kamera/microphone lagi dengan constraint exact.
+6. Publisher memakai `MediaStreamTrackProcessor` untuk membaca track kamera
+   langsung. Tidak ada canvas, `captureStream()`, rotate pixel, atau black bar
+   pada media yang dikirim.
+7. Preview desktop memakai `<video>` direct dengan `object-fit: contain` pada
+   stage 16:9; ruang hitam preview tidak menjadi bagian encoded media.
+8. Preview mobile memakai source video yang sama dan dapat memakai CSS rotate
+   untuk tampilan portrait app; transform CSS tidak masuk ke publisher.
+9. `VideoEncoder` menghasilkan H.264 atau H.265 pada ukuran/FPS track yang sama.
+10. `AudioEncoder` menghasilkan codec audio yang dipilih bila audio aktif.
+11. Encoded chunks dikirim melalui publisher Media-over-QUIC yang divendor dari
     release MediaMTX yang dipin.
-11. MediaMTX menerima encoded media pada path stream.
+12. Subgroup encoded pada setiap track ditulis FIFO ke WebTransport supaya group
+    ID tidak tiba di MediaMTX secara acak ketika beberapa stream QUIC selesai
+    bersamaan.
+13. MediaMTX menerima encoded media pada path stream.
 
 Media-over-QUIC membutuhkan HTTPS serta akses TCP dan UDP pada port yang sama.
 Browser publishing saat ini diarahkan ke Chrome karena pipeline publishing
@@ -159,6 +165,7 @@ POST /api/streams
 GET  /api/streams
 GET  /api/streams/{id}
 PATCH /api/streams/{id}
+DELETE /api/streams/{id}
 GET  /api/streams/{id}/stats
 POST /api/streams/{id}/stop
 
@@ -199,10 +206,12 @@ Response mengembalikan:
 }
 ```
 
-`GET /api/streams/{id}` mengembalikan kembali URL/token job terbuka kepada
-operator terautentikasi. `PATCH /api/streams/{id}` menyimpan profile baru tanpa
-mengganti path atau token. `playerUrl` dapat dipakai langsung sebagai
-`iframe src`. Token tidak ditulis ke log dan hanya dicabut oleh Close job.
+`GET /api/streams/{id}` mengembalikan kembali URL/token setiap job yang masih
+tersimpan, termasuk status `stopped`, kepada operator terautentikasi. `PATCH /api/streams/{id}`
+menyimpan profile baru tanpa mengganti path atau token dan
+menyiapkan kembali path MediaMTX. `DELETE /api/streams/{id}` menghapus job
+secara permanen. `playerUrl` dapat dipakai langsung sebagai `iframe src`.
+Token tidak ditulis ke log dan hanya dicabut oleh Delete.
 
 `GET /api/streams/{id}/stats` mengembalikan:
 
@@ -302,8 +311,11 @@ path stream dan MediaMTX Playback API, sehingga metadata tidak diduplikasi.
   secret dan SQLite bertahan pada bind mount, sehingga URL stabil setelah restart.
 - MoQ publish mengirim capability token sebagai Bearer token pada WebTransport.
 - SRT read memakai token sebagai password pada stream ID.
-- Token aktif selama job terbuka dan tidak dicabut oleh Stop relay.
-- Path hanya dihapus dari MediaMTX saat Close job.
+- Token aktif selama row job masih tersimpan dan tidak dicabut oleh Stop relay.
+- Stop relay melepas path aktif dari MediaMTX agar slot dan koneksi dilepas;
+  PATCH/Start berikutnya membuat atau memperbarui path yang sama.
+- Delete menghapus path jika masih aktif lalu menghapus row job, sehingga token
+  lama tidak dapat diautentikasi lagi.
 - MediaMTX Control API, metrics, dan playback tidak boleh public.
 
 SRT URL adalah bearer credential. UI harus menggunakan `Referrer-Policy:
@@ -384,12 +396,15 @@ MediaMTX menyediakan byte counters yang dapat dipakai untuk perhitungan ini.
 
 ### 7.4 Stop relay, reuse, dan cleanup
 
-1. Stop relay hanya menutup resource browser; job kembali `ready`.
-2. Profile dapat diubah melalui `PATCH /api/streams/{id}` sebelum Start berikutnya.
+1. Stop relay menutup resource browser, memanggil endpoint stop, menandai job
+   `stopped`, dan memanggil `DELETE /v3/config/paths/delete/{path}`.
+2. Profile job tidak diubah dari halaman live; endpoint update tetap tersedia
+   untuk sinkronisasi metadata sebelum Start berikutnya.
 3. Start berikutnya memakai path, read token, dan SRT URL yang sama; OBS hanya
    mengalami interupsi/reconnect, bukan membutuhkan URL baru.
-4. Close job mencabut hash token, memanggil
-   `DELETE /v3/config/paths/delete/{path}`, lalu menandai job `stopped`.
+4. Kembali ke Home menjalankan Stop lalu hanya mengubah tampilan dashboard.
+5. Delete menghapus path bila perlu, menghapus row SQLite, dan mencabut akses
+   token secara permanen. Recording tidak dihapus otomatis.
 
 Jika MediaMTX mati, child process direstart dengan backoff. Konfigurasi
 `all_others` membuat path bertoken tetap dapat dipakai; Start/PATCH berikutnya
@@ -400,14 +415,15 @@ memastikan kembali konfigurasi recording path khusus.
 ### 8.1 Pipeline frame
 
 - Capture track dibaca menggunakan `MediaStreamTrackProcessor`.
-- Kamera source dibuka tanpa constraint resolusi/FPS output; ukuran/FPS source
-  hanya dibaca untuk telemetry dan capability display.
-- Canvas output selalu dibuat pada ukuran yang dipilih operator, termasuk pasangan
-  portrait `1080x1920`, `720x1280`, atau `480x854`.
-- Jika framing sama dengan orientation output, source di-fill ke canvas.
-- Jika framing berbeda, source di-contain dengan background hitam.
-- Frame canvas dikirim ke `VideoEncoder` pada FPS output yang terkunci.
-- Re-configuration tidak boleh mengubah width, height, atau framerate.
+- Capture track dibuka dengan width, height, frameRate exact dan `resizeMode: none`.
+- Hasil `getSettings()` dan frame pertama diverifikasi sebelum publisher berjalan.
+- Ukuran frame dan konfigurasi `VideoEncoder` harus sama agar encoder tidak
+  melakukan scaling.
+- Frame kamera langsung diberikan ke `MediaStreamTrackProcessor` dan encoder.
+- Desktop menampilkan track langsung dalam stage 16:9 dengan `object-fit: contain`.
+- Mobile menampilkan track langsung dalam stage portrait; CSS rotate hanya untuk
+  preview, bukan untuk media output.
+- Orientasi, width, height, dan framerate tidak dikonfigurasi ulang saat live.
 
 ### 8.2 Preflight
 
@@ -418,14 +434,14 @@ gagal bila:
 - codec tidak supported;
 - audio encoder yang diwajibkan tidak tersedia.
 
-Setelah preflight Create lulus, input kamera/microphone dibuka terpisah. Kamera
-tidak harus mampu menghasilkan resolusi/FPS output karena scaling dan pacing
-dilakukan oleh canvas/encoder. Jika input tidak bisa dibuka, job tetap `ready`
-agar operator dapat memilih device lain atau retry.
+Setelah preflight Create lulus, input kamera/microphone dibuka terpisah saat
+operator menekan Start. Kamera wajib menghasilkan resolusi/FPS profile exact;
+tidak ada scaling atau pacing dari browser. Jika input tidak bisa dibuka,
+job tetap `ready` agar operator dapat memilih device lain atau retry.
 
 Operator dapat mematikan audio jika audio encoder atau microphone tidak tersedia.
-Resolusi/FPS output hanya berubah melalui pilihan manual setelah Stop relay, lalu
-diuji ulang pada Start.
+Profile resolusi/FPS tidak berubah di halaman live; buat job baru jika profile
+berbeda diperlukan. Job lama tetap reusable dari dashboard.
 
 ### 8.3 Adaptive controller
 
@@ -627,7 +643,7 @@ npm run build
 - H.265 diuji pada perangkat yang melaporkan supported;
 - capability VP8/VP9/AV1 tampil benar;
 - preflight gagal dengan pesan yang dapat diperbaiki;
-- black bar portrait terlihat pada preview dan output;
+- ruang hitam portrait terlihat pada preview desktop, bukan pada output;
 - adaptive bitrate tidak mengubah resolusi/FPS/codec;
 - reduced-motion dan keyboard navigation.
 
@@ -645,8 +661,8 @@ npm run build
 2. Tambahkan SQLite, seed account, login, password change, dan session.
 3. Integrasikan binary MediaMTX, config dasar, health check, dan Control API.
 4. Tambahkan stream lifecycle, token auth, SRT URL, dan stats.
-5. Tambahkan browser capability probe, preflight, canvas, WebCodecs, dan MoQ
-   publisher.
+5. Tambahkan browser capability probe, exact camera preflight, WebCodecs, dan MoQ
+   publisher tanpa canvas.
 6. Tambahkan adaptive bitrate dan reconnect state.
 7. Tambahkan recording, playback proxy, download, dan disk guard.
 8. Jalankan unit, integration, browser, OBS, dan stress test.
