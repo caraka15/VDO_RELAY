@@ -21,7 +21,7 @@ type recordingView struct {
 
 func (a *App) listRecordings() ([]recordingView, error) {
 	root := filepath.Join(a.cfg.DataDir, "recordings")
-	var result []recordingView
+	result := make([]recordingView, 0)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err

@@ -138,6 +138,22 @@ func TestFrontendCacheAndMissingAssetHandling(t *testing.T) {
 	}
 }
 
+func TestEmptyRecordingsAreAnArray(t *testing.T) {
+	application, err := New(Config{DataDir: t.TempDir(), MaxActiveStreams: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer application.Close()
+
+	items, err := application.listRecordings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items == nil {
+		t.Fatal("empty recordings must be a non-nil slice so JSON encodes as []")
+	}
+}
+
 func TestDefaultLoginCreatesSession(t *testing.T) {
 	application, err := New(Config{DataDir: t.TempDir(), MaxActiveStreams: 8, InternalAddr: "127.0.0.1:0"})
 	if err != nil {

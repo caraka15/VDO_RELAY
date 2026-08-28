@@ -122,7 +122,7 @@ export const changePassword = (currentPassword: string, newPassword: string) =>
     body: JSON.stringify({ currentPassword, newPassword }),
   });
 
-export const listStreams = () => request<Stream[]>("/api/streams");
+export const listStreams = async () => (await request<Stream[] | null>("/api/streams")) ?? [];
 
 export const createStream = (input: StartStreamInput) =>
   request<Stream>("/api/streams", {
@@ -136,7 +136,7 @@ export const getStreamStats = (id: string) =>
 export const stopStream = (id: string) =>
   request<Stream>(`/api/streams/${encodeURIComponent(id)}/stop`, { method: "POST" });
 
-export const listRecordings = () => request<Recording[]>("/api/recordings");
+export const listRecordings = async () => (await request<Recording[] | null>("/api/recordings")) ?? [];
 
 export const deleteRecording = (id: string) =>
   request<void>(`/api/recordings/${encodeURIComponent(id)}`, { method: "DELETE" });
