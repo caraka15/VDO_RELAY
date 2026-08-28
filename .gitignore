@@ -1,0 +1,27 @@
+# Local secrets and runtime state
+/.env
+/.env.*
+!/.env.example
+/data/
+/certs/*
+!/certs/.gitkeep
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.svelte-kit/
+coverage/
+npm-debug.log*
+
+# Go/build artifacts
+*.exe
+*.db
+*.db-shm
+*.db-wal
+
+# Logs and editor/OS files
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
