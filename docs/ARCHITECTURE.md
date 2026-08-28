@@ -71,26 +71,25 @@ deployment semuanya berada dalam satu container.
 
 ### 3.1 Browser ke MediaMTX
 
-1. Svelte memeriksa konfigurasi encoder pilihan melalui
-   `VideoEncoder.isConfigSupported()`, membuka kamera sementara, dan membandingkan
-   metadata resolusi/FPS aktual dengan profile.
-2. Hanya jika preflight lulus, Svelte memanggil `POST /api/streams`; backend
-   membuat path, token stabil, SRT URL, dan player URL.
-3. Halaman kontrol masuk ke state `ready` dan menampilkan profile teruji.
-4. Setelah operator menekan Start, browser mengulangi preflight untuk menghadapi
-   perubahan kondisi perangkat.
-5. Browser membandingkan metadata resolusi dan FPS track aktual dengan profile.
-   Profile ditolak jika metadata hilang atau lebih rendah; tidak ada fallback ke
-   nilai yang diminta.
-6. `MediaStreamTrackProcessor` membaca frame kamera.
-7. Frame digambar ke canvas output berukuran tetap 16:9.
-8. Canvas menghasilkan frame portrait/landscape yang sudah memiliki black bar
-   bila diperlukan.
-9. `VideoEncoder` menghasilkan H.264 atau H.265.
-10. `AudioEncoder` menghasilkan AAC atau Opus bila audio aktif.
-11. Encoded chunks dikirim melalui publisher Media-over-QUIC resmi MediaMTX
-   yang divendor dari release yang dipin.
-12. MediaMTX menerima encoded media pada path stream.
+1. Svelte mengecek `VideoEncoder.isConfigSupported()` dan
+   `AudioEncoder.isConfigSupported()` untuk ukuran/FPS output yang dipilih.
+2. Hanya jika output preflight lulus, Svelte memanggil `POST /api/streams`;
+   backend membuat path, token stabil, SRT URL, dan player URL.
+3. Halaman kontrol otomatis meminta kamera/microphone default setelah job dibuat.
+   Kegagalan input tidak menghapus job; tombol Start dapat dicoba lagi.
+4. Capability setiap kamera dibaca dari `MediaTrackCapabilities` tanpa
+   menjadikan resolusi/FPS kamera sebagai target encoder.
+5. Video element yang sudah `play()` membaca kamera; frame digambar ke canvas
+   output berukuran tetap sesuai orientation job.
+6. Canvas memutar frame 90° bila framing yang dipilih berbeda dari orientasi
+   sumber, lalu menghasilkan black bar bila framing berbeda dari output.
+7. Publisher memakai `MediaStreamTrackProcessor` untuk membaca frame final dari
+   canvas dan menjaga black bar saat framing berbeda dari orientation output.
+8. `VideoEncoder` menghasilkan H.264 atau H.265 pada ukuran/FPS output.
+9. `AudioEncoder` menghasilkan codec audio yang dipilih bila audio aktif.
+10. Encoded chunks dikirim melalui publisher Media-over-QUIC yang divendor dari
+    release MediaMTX yang dipin.
+11. MediaMTX menerima encoded media pada path stream.
 
 Media-over-QUIC membutuhkan HTTPS serta akses TCP dan UDP pada port yang sama.
 Browser publishing saat ini diarahkan ke Chrome karena pipeline publishing
@@ -173,6 +172,7 @@ DELETE /api/recordings/{id}
 ```json
 {
   "codec": "h265",
+  "audioCodec": "opus",
   "width": 1920,
   "height": 1080,
   "fps": 60,
@@ -262,6 +262,7 @@ path                  text unique not null
 publish_token_hash    text not null
 read_token_hash       text not null
 codec                 text not null
+audio_codec           text not null default 'opus'
 width                 integer not null
 height                integer not null
 fps                   integer not null
@@ -399,25 +400,32 @@ memastikan kembali konfigurasi recording path khusus.
 ### 8.1 Pipeline frame
 
 - Capture track dibaca menggunakan `MediaStreamTrackProcessor`.
-- Canvas output selalu dibuat pada ukuran yang dipilih operator.
-- Landscape menggambar source dengan fit penuh.
-- Portrait menggambar source secara contain dengan background hitam.
-- Frame canvas dikirim ke `VideoEncoder` pada FPS yang terkunci.
+- Kamera source dibuka tanpa constraint resolusi/FPS output; ukuran/FPS source
+  hanya dibaca untuk telemetry dan capability display.
+- Canvas output selalu dibuat pada ukuran yang dipilih operator, termasuk pasangan
+  portrait `1080x1920`, `720x1280`, atau `480x854`.
+- Jika framing sama dengan orientation output, source di-fill ke canvas.
+- Jika framing berbeda, source di-contain dengan background hitam.
+- Frame canvas dikirim ke `VideoEncoder` pada FPS output yang terkunci.
 - Re-configuration tidak boleh mengubah width, height, atau framerate.
 
 ### 8.2 Preflight
 
-Preflight melakukan encode lokal selama sekitar 2 detik menggunakan konfigurasi
-aktual. Preflight gagal bila:
+Preflight konfigurasi output dilakukan sebelum `POST /api/streams` menggunakan
+ukuran/FPS/codec target. Preflight Start diulang setelah job tersedia. Preflight
+gagal bila:
 
 - codec tidak supported;
-- kamera tidak dapat memberi sumber yang layak;
-- encoder queue terus bertambah;
-- frame rate aktual tidak mencapai target;
 - audio encoder yang diwajibkan tidak tersedia.
 
-Operator dapat mematikan audio jika audio encoder tidak tersedia. Resolusi atau
-FPS hanya berubah melalui pilihan manual sebelum Start.
+Setelah preflight Create lulus, input kamera/microphone dibuka terpisah. Kamera
+tidak harus mampu menghasilkan resolusi/FPS output karena scaling dan pacing
+dilakukan oleh canvas/encoder. Jika input tidak bisa dibuka, job tetap `ready`
+agar operator dapat memilih device lain atau retry.
+
+Operator dapat mematikan audio jika audio encoder atau microphone tidak tersedia.
+Resolusi/FPS output hanya berubah melalui pilihan manual setelah Stop relay, lalu
+diuji ulang pada Start.
 
 ### 8.3 Adaptive controller
 

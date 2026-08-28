@@ -160,23 +160,19 @@ class MediaMTXMoQPublisher {
   }
 
   async #fetchFingerprint() {
-    const hex = await fetch(this.#conf.fingerprintUrl, {
-      headers: this.#authHeader(),
-    }).then((r) => r.text());
+    // The fingerprint is public certificate metadata. Sending Authorization here
+    // forces a CORS preflight that the MediaMTX fingerprint endpoint does not need.
+    const response = await fetch(this.#conf.fingerprintUrl);
+    if (!response.ok) {
+      throw new Error(`fingerprint request failed (${response.status})`);
+    }
+    const hex = (await response.text()).trim();
+    if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2 !== 0) {
+      throw new Error("MediaMTX returned an invalid certificate fingerprint");
+    }
     this.#fingerprint = new Uint8Array(hex.length / 2);
     for (let i = 0; i < this.#fingerprint.length; i++)
       this.#fingerprint[i] = parseInt(hex.slice(2 * i, 2 * i + 2), 16);
-  }
-
-  #authHeader() {
-    if (this.#conf.user !== undefined && this.#conf.user !== "") {
-      const credentials = btoa(`${this.#conf.user}:${this.#conf.pass}`);
-      return { Authorization: `Basic ${credentials}` };
-    }
-    if (this.#conf.token !== undefined && this.#conf.token !== "") {
-      return { Authorization: `Bearer ${this.#conf.token}` };
-    }
-    return {};
   }
 
   #encodeAuthParams() {
@@ -377,8 +373,8 @@ class MediaMTXMoQPublisher {
   }
 
   async #encodeVideo(mediaTrack, trackAlias) {
-    const isAvc = this.#conf.videoCodec.startsWith("avc3");
-    const isHvc = this.#conf.videoCodec.startsWith("hev1");
+    const isAvc = this.#conf.videoCodec.startsWith("avc");
+    const isHvc = this.#conf.videoCodec.startsWith("hev") || this.#conf.videoCodec.startsWith("hvc");
     const processor = new MediaStreamTrackProcessor({ track: mediaTrack });
     const frameReader = processor.readable.getReader();
 
@@ -439,7 +435,7 @@ class MediaMTXMoQPublisher {
           data,
         ).catch((err) => this.#handleError(err.message));
       },
-      error: (err) => console.error(err.message),
+      error: (err) => this.#handleError(`video encoder: ${err.message}`),
     });
 
     const videoConfig = {
@@ -490,7 +486,7 @@ class MediaMTXMoQPublisher {
           data,
         ).catch((err) => this.#handleError(err.message));
       },
-      error: (err) => console.error(err.message),
+      error: (err) => this.#handleError(`audio encoder: ${err.message}`),
     });
 
     this.#audioEncoder.configure({

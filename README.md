@@ -1,7 +1,8 @@
 # VDO Relay
 
 VDO Relay adalah private camera relay untuk Android Chrome dan desktop Chrome.
-Browser melakukan capture, framing 16:9, dan encode H.264/H.265. MediaMTX
+Browser melakukan capture, framing, dan encode H.264/H.265 pada output
+landscape atau portrait yang dikunci per job. MediaMTX
 menerima hasil encode tersebut lalu menyediakan output SRT untuk OBS tanpa
 server-side transcoding.
 
@@ -150,21 +151,26 @@ Setup tidak mengubah UFW secara otomatis untuk menghindari mengunci akses SSH.
 
 1. Buka `https://app.example.com` dan login dengan `admin` / `admin`.
 2. Ganti password saat diminta.
-3. Buka form stream baru; deteksi device/microphone dapat dijalankan bila perlu.
-4. Pilih H.264 atau H.265, resolusi, FPS, bitrate maksimum, audio, portrait,
-   dan recording.
-5. Tekan **Create stream**. Browser membuka kamera sementara untuk menguji
-   kombinasi codec/resolusi/FPS; API hanya membuat job jika pengujian lolos.
-6. Di halaman kontrol, tekan **Start camera & relay**.
+3. Buka form stream baru. Browser membaca daftar kamera, microphone, dan codec.
+4. Pilih H.264/H.265, codec audio, resolusi/FPS output, bitrate maksimum,
+   bentuk output awal di mobile, dan recording.
+5. Tekan **Create stream**. Browser hanya memeriksa encoder output sebelum job
+   dibuat; kamera belum dipaksa mengikuti resolusi/FPS output.
+6. Setelah job dibuat, halaman kontrol otomatis membuka kamera/mikrofon default
+   dan mencoba memulai relay. Jika input gagal, job tetap tersedia untuk retry.
 7. Untuk mengganti resolusi/FPS, tekan **Stop relay**, ubah profile, lalu Start
    lagi. Path, token read, dan URL OBS tidak berubah.
 8. Gunakan **Close job** hanya ketika URL OBS memang ingin dicabut permanen.
 9. Job yang masih terbuka dapat dibuka kembali dari dashboard setelah refresh.
 
-Label codec pada setup adalah hasil probe encoder browser `1280x720/30`, bukan
-klaim hardware encoder. Browser tidak menyediakan daftar kombinasi profile
-kamera yang pasti, sehingga kombinasi pilihan diuji langsung sebelum job dibuat
-dan diperiksa ulang pada setiap Start.
+Label codec pada setup adalah hasil probe encoder browser, bukan klaim hardware
+encoder. Resolusi/FPS yang dipilih adalah output encoder. Capability kamera
+ditampilkan terpisah per device (ukuran maksimum, FPS maksimum, dan zoom API
+bila tersedia), lalu source dibuka tanpa dipaksa menyamai target output.
+
+Pada mobile, output orientation dikunci saat job dibuat. Framing dapat diubah
+manual tanpa mengubah ukuran file; tombol Unlock mengaktifkan pembacaan gyro
+untuk auto landscape/portrait.
 
 Halaman Result menyediakan:
 

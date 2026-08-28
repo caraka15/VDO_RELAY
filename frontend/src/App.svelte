@@ -25,11 +25,13 @@
     openCapture,
     checkMicrophone,
     mediaAccessError,
+    probeCameraDevices,
     probeAudioCodecs,
     probeVideoCodecs,
     startAdaptiveBitrate,
     startMoqPublisher,
     type AudioCapability,
+    type CameraDevice,
     type CaptureSession,
     type Publisher,
     type VideoCapability,
@@ -62,7 +64,7 @@
 
   let codecs: VideoCapability[] = [];
   let audioCodecs: AudioCapability[] = [];
-  let cameraDevices: MediaDeviceInfo[] = [];
+  let cameraDevices: CameraDevice[] = [];
   let microphoneDevices: MediaDeviceInfo[] = [];
   let microphonePermission: "unknown" | "granted" | "denied" = "unknown";
   let microphoneChecking = false;
@@ -155,11 +157,8 @@
     setupError = "";
     try {
       await loadCapabilities();
-      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera API tidak tersedia. Pastikan halaman dibuka melalui HTTPS.");
       try {
-        const temporary = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        temporary.getTracks().forEach((track) => track.stop());
-        cameraDevices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "videoinput");
+        cameraDevices = await probeCameraDevices();
       } catch (error) {
         setupError = mediaAccessError(error, "camera").message;
       }
@@ -196,6 +195,7 @@
         setupError = errorMessage(error);
       }
     }
+    if (cameraDevices.length === 0 && !detecting) void detectDevices();
   }
 
   function showDashboard() {
@@ -224,18 +224,25 @@
     createBusy = true;
     setupError = "";
     try {
-      const { capture } = await openValidatedCapture(input);
-      verifiedProfile = { actualWidth: capture.actualWidth, actualHeight: capture.actualHeight, actualFps: capture.actualFps };
-      capture.stop();
+      const outputProbe = await probeVideoCodecs(input.width, input.height, input.fps);
+      const outputCapability = outputProbe.find((item) => item.key === input.codec && item.supported && item.srtCompatible);
+      if (!outputCapability) {
+        throw new Error(`Encoder ${input.codec.toUpperCase()} tidak mendukung output ${input.width} x ${input.height} pada ${input.fps} FPS. Pilih profile atau codec lain.`);
+      }
+      if (input.audioEnabled && !audioCodecs.some((item) => item.key === input.audioCodec && item.supported)) {
+        throw new Error(`Encoder audio ${input.audioCodec.toUpperCase()} tidak tersedia di browser.`);
+      }
       const { deviceId: _deviceId, audioDeviceId: _audioDeviceId, ...streamInput } = input;
       liveStream = await createStream(streamInput);
       preparedInput = input;
       captureSession = null;
+      verifiedProfile = null;
       targetBitrateKbps = input.maxBitrateKbps;
       publisherStatus = "ready";
       publisherError = "";
       liveStats = null;
       page = "live";
+      await handlePublishStart();
     } catch (error) {
       setupError = errorMessage(error, "Job stream belum bisa dibuat.");
     } finally {
@@ -248,6 +255,9 @@
     const capability = finalProbe.find((item) => item.key === input.codec && item.supported && item.srtCompatible);
     if (!capability) {
       throw new Error(`Encoder ${input.codec.toUpperCase()} tidak mendukung ${input.width}×${input.height} pada ${input.fps} FPS. Pilih profile lebih rendah.`);
+    }
+    if (input.audioEnabled && !audioCodecs.some((item) => item.key === input.audioCodec && item.supported)) {
+      throw new Error(`Encoder audio ${input.audioCodec.toUpperCase()} tidak tersedia di browser.`);
     }
     return { capability, capture: await openCapture(input) };
   }
@@ -268,6 +278,7 @@
         height: stream.height,
         fps: stream.fps,
         maxBitrateKbps: stream.maxBitrateKbps,
+        audioCodec: stream.audioCodec || "opus",
         portraitMode: stream.portraitMode,
         audioEnabled: stream.audioEnabled,
         record: stream.record,
@@ -312,7 +323,7 @@
       liveStream = updatedStream;
       verifiedProfile = { actualWidth: capture.actualWidth, actualHeight: capture.actualHeight, actualFps: capture.actualFps };
       captureSession = capture;
-      const selectedAudio = audioCodecs.find((item) => item.supported && item.codec === "mp4a.40.2") || audioCodecs.find((item) => item.supported);
+      const selectedAudio = audioCodecs.find((item) => item.key === streamInput.audioCodec && item.supported);
       startedPublisher = await startMoqPublisher({
         publishUrl: updatedStream.publishUrl!,
         fingerprintUrl: updatedStream.fingerprintUrl || `${updatedStream.publishUrl}/fingerprint`,
@@ -361,12 +372,15 @@
   }
 
   function setPortraitMode(portraitMode: boolean) {
-    if (!preparedInput || !liveStream || publishBusy || publisher || captureSession) return;
+    if (!preparedInput || !liveStream || publishBusy) return;
     preparedInput = { ...preparedInput, portraitMode };
     liveStream = { ...liveStream, portraitMode };
-    verifiedProfile = null;
-    publisherStatus = "ready";
-    publisherError = "";
+    captureSession?.setPortraitMode(portraitMode);
+    if (!captureSession) {
+      verifiedProfile = null;
+      publisherStatus = "ready";
+      publisherError = "";
+    }
   }
 
   function setProfile(width: number, height: number, fps: number) {
@@ -375,6 +389,13 @@
     liveStream = { ...liveStream, width, height, fps };
     verifiedProfile = null;
     publisherStatus = "ready";
+    publisherError = "";
+  }
+
+  function setSource(deviceId: string, audioDeviceId: string) {
+    if (!preparedInput || !liveStream || publishBusy || publisher || captureSession) return;
+    preparedInput = { ...preparedInput, deviceId: deviceId || undefined, audioDeviceId: audioDeviceId || undefined };
+    verifiedProfile = null;
     publisherError = "";
   }
 
@@ -497,7 +518,7 @@
 {:else if page === "result" && liveStream}
   <ResultView stream={liveStream} stats={liveStats} {publisherStatus} {targetBitrateKbps} onBack={() => (page = "live")} onStop={stopRelay} />
 {:else if page === "live" && liveStream}
-  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} stats={liveStats} {publisherStatus} {publisherError} {targetBitrateKbps} {copied} starting={publishBusy} onStart={handlePublishStart} onProfile={setProfile} onPortraitMode={setPortraitMode} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onCloseJob={closeJob} />
+  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} {cameraDevices} {microphoneDevices} deviceId={preparedInput?.deviceId || ""} audioDeviceId={preparedInput?.audioDeviceId || ""} stats={liveStats} {publisherStatus} {publisherError} {targetBitrateKbps} {copied} starting={publishBusy} onStart={handlePublishStart} onProfile={setProfile} onPortraitMode={setPortraitMode} onSource={setSource} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onCloseJob={closeJob} />
 {:else}
   <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onOpenStream={handleOpenStream} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
 {/if}

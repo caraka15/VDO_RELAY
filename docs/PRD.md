@@ -12,7 +12,7 @@ Alur v1:
 ```text
 Android Chrome / Desktop Chrome
   -> getUserMedia + WebCodecs
-  -> output canvas 16:9
+  -> output canvas fixed landscape or portrait
   -> Media-over-QUIC/WebTransport
   -> MediaMTX
   -> SRT read URL
@@ -75,20 +75,18 @@ native. Browser tidak memiliki akses UDP/SRT mentah.
 ### 4.2 Membuat stream
 
 1. Operator memilih `New stream`.
-2. Browser menyediakan deteksi kamera dan tombol cek microphone terpisah;
-   pemeriksaan ini opsional dan hanya membuka track sementara.
-3. Browser mengecek dukungan codec dan konfigurasi encoder.
-4. Operator memilih kamera, microphone, codec, resolusi, FPS, bitrate maksimum,
-   mode portrait, dan recording.
-5. Tombol `Create stream` menguji konfigurasi encoder serta membuka kamera dan
-   microphone sementara untuk memverifikasi profile aktual.
-6. Hanya jika preflight lulus, frontend meminta backend membuat path, token,
-   SRT URL, dan job berstatus `ready`.
-7. Halaman kontrol menampilkan profile teruji, framing, tombol Start/Stop relay,
-   dan SRT URL yang sudah dapat disalin.
-8. Tombol `Start camera & relay` memeriksa ulang profile lalu mulai mengirim
-   encoded media ke MediaMTX.
-9. Halaman kontrol menampilkan status dan telemetry live.
+2. Browser mengecek dukungan encoder video dan audio yang tersedia.
+3. Operator memilih codec video/audio, resolusi/FPS output, bitrate maksimum,
+   bentuk output awal, dan recording. Tidak ada resolusi/FPS kamera yang dipakai
+   sebagai target encoder.
+4. Tombol `Create stream` melakukan preflight konfigurasi encoder output tanpa
+   membuka kamera. Jika lulus, backend membuat path, token, SRT URL, dan job
+   berstatus `ready`.
+5. Setelah job berhasil dibuat, halaman kontrol otomatis membuka kamera dan
+   microphone default lalu memulai publisher. Jika input gagal dibuka, job tetap
+   ada dan tombol Start dapat dicoba lagi setelah input diperbaiki.
+6. Halaman kontrol menampilkan canvas hasil final, kemampuan sumber kamera,
+   status track audio, level audio, framing, dan telemetry.
 
 Kegagalan capability atau preflight harus menghentikan proses dengan pesan
 yang menjelaskan penyebab dan tindakan perbaikan. Tidak boleh ada fallback
@@ -148,11 +146,13 @@ kamera, jaminan hardware encoder, atau jaminan performa. UI harus menyebut
 resolusi/FPS yang dipakai probe dan tidak boleh melabeli seluruh profile kamera
 sebagai tersedia.
 
-Create dan setiap Start harus memeriksa konfigurasi encoder pilihan, membuka
-kamera, lalu membaca resolusi dan FPS aktual dari metadata video/track. Nilai
-yang tidak dilaporkan atau lebih rendah dari profile pilihan harus ditolak;
-nilai request tidak boleh dipakai sebagai fallback. Kegagalan preflight Create
-tidak boleh mengirim `POST /api/streams`.
+Create dan setiap Start harus memeriksa konfigurasi encoder pilihan dengan ukuran
+dan FPS output yang sebenarnya. Preflight Create tidak membuka kamera dan tidak
+membandingkan kemampuan kamera dengan target output. Setiap Start membuka input
+default/pilihan tanpa memaksa resolusi atau FPS output; browser kemudian
+menampilkan resolusi dan FPS sumber aktual jika dilaporkan. Nilai output tetap
+berasal dari canvas dan encoder, bukan dari track kamera. Kegagalan preflight
+Create tidak boleh mengirim `POST /api/streams`.
 
 VP8, VP9, dan AV1 dapat ditampilkan sebagai informasi capability, tetapi tidak
 dapat dipilih untuk profile SRT v1 karena output SRT MediaMTX difokuskan pada
@@ -162,12 +162,14 @@ H.264/H.265. [MoQ codecs](https://mediamtx.org/docs/publish/moq-clients) · [SRT
 
 Pilihan v1:
 
-- Resolusi: `1920x1080`, `1280x720`, `854x480`.
+- Resolusi output landscape: `1920x1080`, `1280x720`, `854x480`.
+- Resolusi output portrait: pasangan terbalik dari profile di atas.
 - FPS: `24`, `30`, `60`.
 - Codec: H.264 atau H.265 jika preflight lulus.
+- Audio codec: AAC atau Opus jika preflight lulus.
 - Maximum bitrate: `500–12000 kbps`.
 - Audio: aktif/nonaktif.
-- Audio default: AAC jika didukung, otherwise Opus.
+- Audio default: Opus jika didukung, atau AAC sebagai fallback.
 
 Default profile:
 
@@ -190,12 +192,18 @@ bukan pasangan minimum/maksimum. [WebCodecs configuration](https://developer.moz
 
 ### FR-05 — Framing dan orientation
 
-- Output encoder selalu 16:9.
-- Mode default adalah landscape.
-- Tombol `Portrait content` mengubah framing, bukan dimensi output.
-- Video portrait di-fit ke canvas 16:9 dengan black bar kiri dan kanan.
-- Preview menampilkan hasil canvas final.
-- Sistem tidak bergantung pada `screen.orientation.lock()`.
+- Bentuk output awal (landscape atau portrait) dikunci ketika job dibuat.
+- Desktop selalu menggunakan output landscape dan preview box landscape.
+- Mobile dapat memilih output landscape atau portrait sebelum membuat job.
+- Tombol framing mengubah isi canvas (termasuk rotasi 90° bila orientasi sumber
+  berbeda), bukan ukuran output yang dikunci.
+- Output landscape dengan framing portrait memakai black bar kiri/kanan.
+- Output portrait dengan framing landscape memakai black bar atas/bawah.
+- Preview menampilkan hasil canvas final di box landscape desktop atau box
+  portrait mobile.
+- Mobile memulai dalam keadaan orientation locked. Tombol rotate mengubah
+  framing manual; tombol Unlock mengaktifkan sensor gyro untuk auto landscape /
+  portrait. Sistem tidak bergantung pada `screen.orientation.lock()`.
 
 ### FR-06 — Relay ke OBS
 
@@ -268,12 +276,12 @@ Gaya visual: flat dark operator console.
 
 Pesan error harus menyebutkan penyebab dan tindakan:
 
-- Kamera atau microphone ditolak: minta permission lalu retry.
+- Kamera atau microphone ditolak: minta permission lalu retry dari halaman live.
 - Tombol `Cek mic` harus membuka permission microphone secara langsung,
   menampilkan input audio yang terdeteksi, dan memberi instruksi izin Chrome.
 - HTTPS tidak tersedia: tampilkan instruksi domain/certificate.
 - Codec tidak didukung: pilih codec atau profile lain.
-- Resolusi/FPS tidak tersedia: pilih profile yang lebih rendah secara manual.
+- Output encoder tidak tersedia: pilih codec, resolusi, atau FPS yang didukung.
 - Encoder overload: turunkan maximum bitrate atau profile secara manual.
 - Transport congestion: tampilkan target bitrate yang turun.
 - Transport putus: tampilkan reconnect tanpa mengubah resolusi/FPS.
@@ -288,8 +296,8 @@ Pesan error harus menyebutkan penyebab dan tindakan:
 - SQLite dan recording tetap ada setelah image/container di-rebuild karena
   `/data` di-bind mount ke folder host.
 - Pengguna anonim tidak dapat membuat stream atau membaca SRT.
-- `Create stream` menguji profile sebelum API membuat job; profile yang gagal
-  tidak meninggalkan job server.
+- `Create stream` menguji konfigurasi output encoder sebelum API membuat job;
+  profile yang gagal tidak meninggalkan job server.
 - Stop/Start relay serta perubahan resolusi/FPS mempertahankan path, token read,
   dan SRT URL yang sama.
 - Job aktif dapat dibuka kembali dari dashboard setelah refresh/backend restart.
@@ -297,7 +305,12 @@ Pesan error harus menyebutkan penyebab dan tindakan:
 - H.264/H.265 yang lolos preflight dapat live ke MediaMTX.
 - VP8/VP9/AV1 dapat dideteksi dan diberi status kompatibilitas yang benar.
 - Resolusi, FPS, dan codec tidak berubah ketika adaptive bitrate aktif.
-- Portrait content menghasilkan output landscape dengan black bar kiri-kanan.
+- Output landscape dengan framing portrait menghasilkan black bar kiri-kanan;
+  output portrait dengan framing landscape menghasilkan black bar atas-bawah.
+- Capability tiap kamera menampilkan ukuran maksimum, FPS maksimum, dan status
+  zoom API bila browser melaporkannya.
+- Audio track yang benar-benar aktif terlihat sebagai status dan level meter di
+  halaman live.
 - SRT token valid dapat dibaca OBS dengan latency sekitar 2 detik.
 - SRT token salah ditolak.
 - Record off tidak membuat file.
@@ -316,4 +329,4 @@ Pesan error harus menyebutkan penyebab dan tindakan:
 - 0,5 MB/s kira-kira 4 Mbps dan harus mencakup audio serta overhead transport.
 - Recording 4 Mbps menghabiskan kira-kira 1,8 GB per jam per stream.
 - SRT URL mengandung bearer token; token hanya ditampilkan setelah login dan
-  dicabut saat stream berhenti.
+  dicabut saat job ditutup permanen, bukan saat relay di-Stop.

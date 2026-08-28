@@ -196,6 +196,7 @@ func (a *App) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 
 type createStreamRequest struct {
 	Codec          string `json:"codec"`
+	AudioCodec     string `json:"audioCodec"`
 	Width          int    `json:"width"`
 	Height         int    `json:"height"`
 	FPS            int    `json:"fps"`
@@ -210,7 +211,16 @@ func (input createStreamRequest) validate() error {
 	if input.Codec != "h264" && input.Codec != "h265" {
 		return errors.New("codec must be h264 or h265")
 	}
-	validSize := (input.Width == 1920 && input.Height == 1080) || (input.Width == 1280 && input.Height == 720) || (input.Width == 854 && input.Height == 480)
+	input.AudioCodec = strings.ToLower(input.AudioCodec)
+	if input.AudioCodec == "" {
+		input.AudioCodec = "opus"
+	}
+	if input.AudioCodec != "aac" && input.AudioCodec != "opus" {
+		return errors.New("audioCodec must be aac or opus")
+	}
+	validSize := (input.Width == 1920 && input.Height == 1080) || (input.Width == 1080 && input.Height == 1920) ||
+		(input.Width == 1280 && input.Height == 720) || (input.Width == 720 && input.Height == 1280) ||
+		(input.Width == 854 && input.Height == 480) || (input.Width == 480 && input.Height == 854)
 	if !validSize {
 		return errors.New("unsupported resolution")
 	}
@@ -228,6 +238,7 @@ type streamResponse struct {
 	Path               string    `json:"path"`
 	Status             string    `json:"status"`
 	Codec              string    `json:"codec"`
+	AudioCodec         string    `json:"audioCodec"`
 	Width              int       `json:"width"`
 	Height             int       `json:"height"`
 	FPS                int       `json:"fps"`
@@ -262,6 +273,10 @@ func (a *App) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.Codec = strings.ToLower(input.Codec)
+	if input.AudioCodec == "" {
+		input.AudioCodec = "opus"
+	}
+	input.AudioCodec = strings.ToLower(input.AudioCodec)
 	if err := input.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), "invalid_stream")
 		return
@@ -296,13 +311,13 @@ func (a *App) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	_, err = a.db.ExecContext(r.Context(), `INSERT INTO streams (id, path, status, codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at) VALUES (?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, pathName, input.Codec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), streamTokenHash(publishToken), streamTokenHash(readToken), now.Unix())
+	_, err = a.db.ExecContext(r.Context(), `INSERT INTO streams (id, path, status, codec, audio_codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at) VALUES (?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, pathName, input.Codec, input.AudioCodec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), streamTokenHash(publishToken), streamTokenHash(readToken), now.Unix())
 	if err != nil {
 		_ = a.media.deletePath(context.Background(), pathName)
 		writeError(w, http.StatusInternalServerError, "could not save stream", "database_error")
 		return
 	}
-	response := a.responseForStream(streamRecord{ID: id, Path: pathName, Status: "ready", Codec: input.Codec, Width: input.Width, Height: input.Height, FPS: input.FPS, MaxBitrateKbps: input.MaxBitrateKbps, CurrentBitrateKbps: input.MaxBitrateKbps, PortraitMode: input.PortraitMode, AudioEnabled: input.AudioEnabled, Record: input.Record, CreatedAt: now}, r, publishToken, readToken)
+	response := a.responseForStream(streamRecord{ID: id, Path: pathName, Status: "ready", Codec: input.Codec, AudioCodec: input.AudioCodec, Width: input.Width, Height: input.Height, FPS: input.FPS, MaxBitrateKbps: input.MaxBitrateKbps, CurrentBitrateKbps: input.MaxBitrateKbps, PortraitMode: input.PortraitMode, AudioEnabled: input.AudioEnabled, Record: input.Record, CreatedAt: now}, r, publishToken, readToken)
 	writeJSON(w, http.StatusCreated, response)
 }
 
@@ -325,7 +340,7 @@ func (a *App) responseForStream(stream streamRecord, r *http.Request, publishTok
 	}
 	srtURL := "srt://" + srtHost + ":8890?streamid=read:" + stream.Path + ":user:" + readToken + "&latency=2000000&pkt_size=1316"
 	playerURL := moqPlayerURL(moqBase, stream.Path, readToken)
-	return streamResponse{ID: stream.ID, Path: stream.Path, Status: stream.Status, Codec: stream.Codec, Width: stream.Width, Height: stream.Height, FPS: stream.FPS, MaxBitrateKbps: stream.MaxBitrateKbps, CurrentBitrateKbps: stream.CurrentBitrateKbps, PortraitMode: stream.PortraitMode, AudioEnabled: stream.AudioEnabled, Record: stream.Record, CreatedAt: stream.CreatedAt, PublishURL: publishURL, FingerprintURL: publishURL + "/fingerprint", PublishToken: publishToken, SRTURL: srtURL, PlayerURL: playerURL}
+	return streamResponse{ID: stream.ID, Path: stream.Path, Status: stream.Status, Codec: stream.Codec, AudioCodec: stream.AudioCodec, Width: stream.Width, Height: stream.Height, FPS: stream.FPS, MaxBitrateKbps: stream.MaxBitrateKbps, CurrentBitrateKbps: stream.CurrentBitrateKbps, PortraitMode: stream.PortraitMode, AudioEnabled: stream.AudioEnabled, Record: stream.Record, CreatedAt: stream.CreatedAt, PublishURL: publishURL, FingerprintURL: publishURL + "/fingerprint", PublishToken: publishToken, SRTURL: srtURL, PlayerURL: playerURL}
 }
 
 func moqPlayerURL(base, streamPath, readToken string) string {
@@ -347,7 +362,7 @@ func moqPlayerURL(base, streamPath, readToken string) string {
 }
 
 func (a *App) publicStreamResponse(stream streamRecord) streamResponse {
-	return streamResponse{ID: stream.ID, Path: stream.Path, Status: stream.Status, Codec: stream.Codec, Width: stream.Width, Height: stream.Height, FPS: stream.FPS, MaxBitrateKbps: stream.MaxBitrateKbps, CurrentBitrateKbps: stream.CurrentBitrateKbps, PortraitMode: stream.PortraitMode, AudioEnabled: stream.AudioEnabled, Record: stream.Record, CreatedAt: stream.CreatedAt, Error: stream.Error}
+	return streamResponse{ID: stream.ID, Path: stream.Path, Status: stream.Status, Codec: stream.Codec, AudioCodec: stream.AudioCodec, Width: stream.Width, Height: stream.Height, FPS: stream.FPS, MaxBitrateKbps: stream.MaxBitrateKbps, CurrentBitrateKbps: stream.CurrentBitrateKbps, PortraitMode: stream.PortraitMode, AudioEnabled: stream.AudioEnabled, Record: stream.Record, CreatedAt: stream.CreatedAt, Error: stream.Error}
 }
 
 func (a *App) privateStreamResponse(stream streamRecord, r *http.Request) streamResponse {
@@ -421,6 +436,10 @@ func (a *App) handleUpdateStream(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 	input.Codec = strings.ToLower(input.Codec)
+	if input.AudioCodec == "" {
+		input.AudioCodec = "opus"
+	}
+	input.AudioCodec = strings.ToLower(input.AudioCodec)
 	if err := input.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), "invalid_stream")
 		return
@@ -444,13 +463,14 @@ func (a *App) handleUpdateStream(w http.ResponseWriter, r *http.Request, id stri
 		writeError(w, http.StatusBadGateway, "could not update media path", "media_config_error")
 		return
 	}
-	_, err = a.db.ExecContext(r.Context(), `UPDATE streams SET status = 'ready', codec = ?, width = ?, height = ?, fps = ?, max_bitrate_kbps = ?, current_bitrate_kbps = ?, portrait_mode = ?, audio_enabled = ?, record = ?, error = '' WHERE id = ?`, input.Codec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), id)
+	_, err = a.db.ExecContext(r.Context(), `UPDATE streams SET status = 'ready', codec = ?, audio_codec = ?, width = ?, height = ?, fps = ?, max_bitrate_kbps = ?, current_bitrate_kbps = ?, portrait_mode = ?, audio_enabled = ?, record = ?, error = '' WHERE id = ?`, input.Codec, input.AudioCodec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update stream", "database_error")
 		return
 	}
 	stream.Status = "ready"
 	stream.Codec = input.Codec
+	stream.AudioCodec = input.AudioCodec
 	stream.Width = input.Width
 	stream.Height = input.Height
 	stream.FPS = input.FPS

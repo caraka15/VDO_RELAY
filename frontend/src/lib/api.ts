@@ -9,6 +9,7 @@ export type Stream = {
   path: string;
   status: "ready" | "connecting" | "live" | "stopped" | "failed";
   codec: "h264" | "h265";
+  audioCodec: "aac" | "opus";
   width: number;
   height: number;
   fps: number;
@@ -52,6 +53,7 @@ export type Recording = {
 
 export type StartStreamInput = {
   codec: "h264" | "h265";
+  audioCodec: "aac" | "opus";
   width: number;
   height: number;
   fps: number;

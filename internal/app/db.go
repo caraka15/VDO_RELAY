@@ -41,6 +41,7 @@ func openDatabase(path string) (*sql.DB, error) {
 			path TEXT NOT NULL UNIQUE,
 			status TEXT NOT NULL,
 			codec TEXT NOT NULL,
+			audio_codec TEXT NOT NULL DEFAULT 'opus',
 			width INTEGER NOT NULL,
 			height INTEGER NOT NULL,
 			fps INTEGER NOT NULL,
@@ -61,7 +62,40 @@ func openDatabase(path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("migrate sqlite: %w", err)
 		}
 	}
+	if err := ensureColumn(db, "streams", "audio_codec", "TEXT NOT NULL DEFAULT 'opus'"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate streams audio codec: %w", err)
+	}
 	return db, nil
+}
+
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var (
+		cid          int
+		name         string
+		columnType   string
+		notNull      int
+		defaultValue sql.NullString
+		primaryKey   int
+	)
+	for rows.Next() {
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	return err
 }
 
 func seedAdmin(db *sql.DB) error {
@@ -88,6 +122,7 @@ type streamRecord struct {
 	Path               string
 	Status             string
 	Codec              string
+	AudioCodec         string
 	Width              int
 	Height             int
 	FPS                int
@@ -113,7 +148,7 @@ func scanStream(row rowScanner) (streamRecord, error) {
 	var createdAt int64
 	var stoppedAt sql.NullInt64
 	if err := row.Scan(
-		&stream.ID, &stream.Path, &stream.Status, &stream.Codec, &stream.Width, &stream.Height,
+		&stream.ID, &stream.Path, &stream.Status, &stream.Codec, &stream.AudioCodec, &stream.Width, &stream.Height,
 		&stream.FPS, &stream.MaxBitrateKbps, &stream.CurrentBitrateKbps, &portrait, &audio, &record,
 		&stream.PublishTokenHash, &stream.ReadTokenHash, &createdAt, &stoppedAt, &stream.Error,
 	); err != nil {
@@ -130,7 +165,7 @@ func scanStream(row rowScanner) (streamRecord, error) {
 	return stream, nil
 }
 
-const streamColumns = `id, path, status, codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at, stopped_at, error`
+const streamColumns = `id, path, status, codec, audio_codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at, stopped_at, error`
 
 func getStream(ctx context.Context, db *sql.DB, id string) (streamRecord, error) {
 	return scanStream(db.QueryRowContext(ctx, `SELECT `+streamColumns+` FROM streams WHERE id = ?`, id))

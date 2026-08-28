@@ -1,12 +1,16 @@
 package app
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestPasswordHashRoundTrip(t *testing.T) {
@@ -81,6 +85,58 @@ func TestReusableStreamTokens(t *testing.T) {
 	defer restarted.Close()
 	if publish != restarted.streamToken("publish", "stream-1") {
 		t.Fatal("stream token changed after backend restart")
+	}
+}
+
+func TestLegacyStreamMigrationAddsAudioCodec(t *testing.T) {
+	dataDir := t.TempDir()
+	legacy, err := sql.Open("sqlite", filepath.Join(dataDir, "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`CREATE TABLE streams (
+		id TEXT PRIMARY KEY,
+		path TEXT NOT NULL UNIQUE,
+		status TEXT NOT NULL,
+		codec TEXT NOT NULL,
+		width INTEGER NOT NULL,
+		height INTEGER NOT NULL,
+		fps INTEGER NOT NULL,
+		max_bitrate_kbps INTEGER NOT NULL,
+		current_bitrate_kbps INTEGER NOT NULL,
+		portrait_mode INTEGER NOT NULL,
+		audio_enabled INTEGER NOT NULL,
+		record INTEGER NOT NULL,
+		publish_token_hash TEXT NOT NULL,
+		read_token_hash TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		stopped_at INTEGER,
+		error TEXT NOT NULL DEFAULT ''
+	)`)
+	if err != nil {
+		legacy.Close()
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`INSERT INTO streams (id, path, status, codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at) VALUES ('legacy', 'vdo-legacy', 'stopped', 'h264', 1280, 720, 30, 4000, 4000, 0, 0, 0, '', '', 1)`)
+	if err != nil {
+		legacy.Close()
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	application, err := New(Config{DataDir: dataDir, MaxActiveStreams: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer application.Close()
+	var codec string
+	if err := application.db.QueryRow(`SELECT audio_codec FROM streams LIMIT 1`).Scan(&codec); err != nil {
+		t.Fatal(err)
+	}
+	if codec != "opus" {
+		t.Fatalf("legacy audio codec = %q, want opus", codec)
 	}
 }
 
