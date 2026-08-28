@@ -43,7 +43,12 @@ require_ubuntu() {
 }
 
 require_privileges() {
-  ((EUID != 0)) || die 'Jalankan sebagai user biasa: ./setup.sh (script akan memakai sudo saat diperlukan).'
+  if ((EUID == 0)); then
+    # Root sudah memiliki privilege penuh; buat pemanggilan sudo di bawah ini
+    # tetap portable pada image Ubuntu minimal yang tidak memasang sudo.
+    sudo() { "$@"; }
+    return
+  fi
   command -v sudo >/dev/null 2>&1 || die 'sudo belum tersedia.'
   sudo -v || die 'Tidak dapat memvalidasi akses sudo.'
   [[ -w "$SCRIPT_DIR" ]] || die "Folder project tidak writable oleh $RUN_USER. Jangan clone dengan sudo, atau perbaiki ownership folder project."

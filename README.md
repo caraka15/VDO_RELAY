@@ -58,9 +58,10 @@ Script menunggu propagasi DNS. Ada pilihan `CONTINUE` untuk kondisi khusus
 seperti NAT atau load balancer, tetapi issuance Certbot tetap dapat gagal jika
 domain belum benar-benar mencapai server.
 
-Jalankan script sebagai user biasa yang memiliki akses `sudo`, bukan dengan
-`sudo ./setup.sh`. Setelah setup selesai, logout/login sekali jika script
-memberi catatan membership group Docker belum aktif.
+Script bisa dijalankan sebagai `root` atau sebagai user biasa yang memiliki
+akses `sudo`. Jika sudah login sebagai `root`, langsung jalankan
+`./setup.sh`; tidak perlu menambahkan `sudo`. Setelah setup selesai, logout/login
+sekali jika script memberi catatan membership group Docker belum aktif.
 
 ## Domain dan arsitektur jaringan
 
