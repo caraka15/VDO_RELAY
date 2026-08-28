@@ -143,9 +143,10 @@ Browser mengecek dukungan `VideoEncoder.isConfigSupported()` untuk:
 - AV1.
 
 `isConfigSupported()` dianggap sebagai probe encoder umum, bukan daftar profile
-kamera, jaminan hardware encoder, atau jaminan performa. UI harus menyebut
-resolusi/FPS yang dipakai probe dan tidak boleh melabeli seluruh profile kamera
-sebagai tersedia.
+kamera, jaminan hardware encoder, atau jaminan performa. Probe meminta
+`hardwareAcceleration: "prefer-hardware"`, tetapi user agent boleh mengabaikan
+hint tersebut. UI harus menyebut resolusi/FPS yang dipakai probe dan tidak boleh
+melabeli seluruh profile kamera sebagai tersedia.
 
 Create dan setiap Start harus memeriksa konfigurasi encoder pilihan dengan ukuran
 dan FPS kamera yang sebenarnya. Preflight Create menguji kombinasi kamera exact
@@ -183,7 +184,8 @@ bukan pasangan minimum/maksimum. [WebCodecs configuration](https://developer.moz
 ### FR-04 — Adaptive bitrate
 
 - Target awal sama dengan maximum bitrate.
-- Tekanan encoder atau transport selama beberapa detik menurunkan target 20%.
+- Tekanan write transport selama beberapa detik menurunkan target 20%; antrean
+  `VideoEncoder` tidak dipakai sebagai indikator jaringan.
 - Kondisi stabil menaikkan target perlahan sampai maximum.
 - Floor teknis internal: `max(256 kbps, 25% dari maximum)`.
 - Ketika floor tetap tidak cukup, status menjadi `reconnecting` atau `failed`.

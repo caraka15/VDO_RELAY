@@ -55,7 +55,7 @@ export type CaptureSession = {
 export type Publisher = {
   close: () => void;
   setVideoBitrate?: (kbps: number) => void;
-  getVideoEncoderQueueSize?: () => number | null;
+  getTransportQueueSize?: () => number | null;
 };
 
 export type MediaDeviceRequest = "camera" | "microphone" | "camera-microphone";
@@ -230,6 +230,7 @@ export async function probeVideoCodecs(width = 1280, height = 720, fps = 30): Pr
             bitrate: 5_000_000,
             framerate: fps,
             latencyMode: "realtime",
+            hardwareAcceleration: "prefer-hardware",
           });
           if (result.supported === true) return { key: candidate.key, label: candidate.label, codec, srtCompatible: candidate.srtCompatible, supported: true };
         } catch {
@@ -423,8 +424,8 @@ export function startAdaptiveBitrate(
     }
   };
   const timer = window.setInterval(() => {
-    if (stopped || !publisher.getVideoEncoderQueueSize) return;
-    const queueSize = publisher.getVideoEncoderQueueSize();
+    if (stopped || !publisher.getTransportQueueSize) return;
+    const queueSize = publisher.getTransportQueueSize();
     const now = Date.now();
     if (queueSize !== null && queueSize > 6) {
       stableSince = 0;

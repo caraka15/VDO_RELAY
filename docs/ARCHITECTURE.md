@@ -447,11 +447,14 @@ berbeda diperlukan. Job lama tetap reusable dari dashboard.
 
 State yang dipantau:
 
-- `VideoEncoder.encodeQueueSize`;
-- dropped/late frame count;
-- publisher transport backpressure;
+- pending write pada publisher transport;
 - MediaMTX inbound byte rate;
 - reconnect/error events.
+
+`VideoEncoder.encodeQueueSize` tidak dipakai sebagai indikator jaringan: nilai
+itu menunjukkan pekerjaan encoder browser, bukan kapasitas write WebTransport.
+Konfigurasi VideoEncoder meminta `hardwareAcceleration: "prefer-hardware"`;
+ini hanya hint yang boleh diabaikan browser, bukan jaminan hardware-only.
 
 Aturan:
 

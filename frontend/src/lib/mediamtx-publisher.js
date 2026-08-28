@@ -59,6 +59,7 @@ class MediaMTXMoQPublisher {
   #uniStreamsListeners = [];
   #videoEncoder = null;
   #audioEncoder = null;
+  #transportPending = new WeakMap();
 
   /**
    * Create a MediaMTXMoQPublisher.
@@ -82,12 +83,13 @@ class MediaMTXMoQPublisher {
         width: this.#conf.videoWidth,
         height: this.#conf.videoHeight,
         latencyMode: "realtime",
+        hardwareAcceleration: "prefer-hardware",
       });
     }
   }
 
-  getVideoEncoderQueueSize() {
-    return this.#videoEncoder?.encodeQueueSize ?? null;
+  getTransportQueueSize() {
+    return this.#wt === null ? null : this.#transportPending.get(this.#wt) || 0;
   }
 
   /**
@@ -130,6 +132,13 @@ class MediaMTXMoQPublisher {
 
   #handleError(err) {
     if (this.#state === "running") {
+      const message = String(err);
+      if (/\b401\b|\b403\b|unauthori[sz]ed|forbidden/i.test(message)) {
+        this.#state = "closed";
+        this.#cleanup();
+        this.#conf.onError?.(`MediaMTX menolak autentikasi publisher: ${message}`);
+        return;
+      }
       this.#state = "restarting";
 
       this.#cleanup();
@@ -140,7 +149,7 @@ class MediaMTXMoQPublisher {
       );
 
       if (this.#conf.onError !== undefined) {
-        this.#conf.onError(`${err}, retrying in some seconds`);
+        this.#conf.onError(`${message}, retrying in some seconds`);
       }
     }
   }
@@ -435,8 +444,7 @@ class MediaMTXMoQPublisher {
         }
 
         const currentGroupId = groupId++;
-        writeQueue = writeQueue
-          .then(() => {
+        writeQueue = this.#queueWrite(transport, writeQueue, () => {
             if (this.#state !== "running" || this.#wt !== transport) return;
             return this.#writeData(
               transport,
@@ -463,6 +471,7 @@ class MediaMTXMoQPublisher {
       width: this.#conf.videoWidth,
       height: this.#conf.videoHeight,
       latencyMode: "realtime",
+      hardwareAcceleration: "prefer-hardware",
     };
     this.#videoEncoder.configure(videoConfig);
 
@@ -502,8 +511,7 @@ class MediaMTXMoQPublisher {
         const data = new Uint8Array(chunk.byteLength);
         chunk.copyTo(data);
         const currentGroupId = groupId++;
-        writeQueue = writeQueue
-          .then(() => {
+        writeQueue = this.#queueWrite(transport, writeQueue, () => {
             if (this.#state !== "running" || this.#wt !== transport) return;
             return this.#writeData(
               transport,
@@ -540,6 +548,14 @@ class MediaMTXMoQPublisher {
       this.#audioEncoder.encode(frame);
       frame.close();
     }
+  }
+
+  #queueWrite(transport, previous, write) {
+    this.#transportPending.set(transport, (this.#transportPending.get(transport) || 0) + 1);
+    return previous.then(write).finally(() => {
+      const remaining = Math.max(0, (this.#transportPending.get(transport) || 1) - 1);
+      this.#transportPending.set(transport, remaining);
+    });
   }
 
   async #writeCatalog(catalogJSON, trackAlias) {

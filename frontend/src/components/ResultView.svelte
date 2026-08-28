@@ -15,6 +15,7 @@
   let copyError = "";
 
   $: playerUrl = stream.playerUrl || "";
+  $: playerAvailable = Boolean(playerUrl && (publisherStatus === "live" || stats?.status === "live"));
   $: embedCode = playerUrl
     ? `<iframe src="${playerUrl}" title="VDO Relay player" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
     : "";
@@ -63,7 +64,7 @@
         <span class="mono text-xs font-bold text-[var(--muted)]">{statusLabel} · {stream.codec.toUpperCase()}</span>
       </div>
       <div class="aspect-video w-full bg-black">
-        {#if playerUrl}
+        {#if playerAvailable}
           <iframe
             class="h-full w-full border-0"
             src={playerUrl}
@@ -72,7 +73,7 @@
             allowfullscreen
           ></iframe>
         {:else}
-          <div class="flex h-full items-center justify-center px-6 text-center text-sm font-bold text-[var(--muted)]">Player URL belum tersedia.</div>
+          <div class="flex h-full items-center justify-center px-6 text-center text-sm font-bold text-[var(--muted)]">Player menunggu relay aktif.</div>
         {/if}
       </div>
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border)] px-4 py-3 text-xs font-semibold text-[var(--muted)]">

@@ -166,8 +166,10 @@ Setup tidak mengubah UFW secara otomatis untuk menghindari mengunci akses SSH.
 10. Gunakan **Delete** di dashboard hanya ketika job dan token OBS memang ingin
     dihapus permanen.
 
-Label codec pada setup adalah hasil probe encoder browser, bukan klaim hardware
-encoder. Resolusi/FPS yang dipilih adalah mode kamera sekaligus ukuran encoder.
+Label codec pada setup adalah hasil probe encoder browser. Probe meminta
+`hardwareAcceleration: "prefer-hardware"`, tetapi browser hanya menjadikannya
+hint dan tidak menyediakan bukti universal bahwa hardware encoder benar-benar
+dipakai. Resolusi/FPS yang dipilih adalah mode kamera sekaligus ukuran encoder.
 Setiap kombinasi diuji dengan constraint exact dan `resizeMode: none`; source
 dibuka tanpa canvas, scaling, pacing, atau rotate pixel.
 

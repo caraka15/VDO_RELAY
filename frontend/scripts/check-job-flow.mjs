@@ -5,6 +5,7 @@ const source = readFileSync(new URL("../src/App.svelte", import.meta.url), "utf8
 const setup = readFileSync(new URL("../src/components/SetupView.svelte", import.meta.url), "utf8");
 const live = readFileSync(new URL("../src/components/LiveView.svelte", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("../src/components/DashboardView.svelte", import.meta.url), "utf8");
+const result = readFileSync(new URL("../src/components/ResultView.svelte", import.meta.url), "utf8");
 const api = readFileSync(new URL("../src/lib/api.ts", import.meta.url), "utf8");
 const media = readFileSync(new URL("../src/lib/media.ts", import.meta.url), "utf8");
 const publisher = readFileSync(new URL("../src/lib/mediamtx-publisher.js", import.meta.url), "utf8");
@@ -37,6 +38,8 @@ assert.doesNotMatch(media, /setPortraitMode/, "The capture session must not expo
 assert.match(live, /preview-video/, "Live preview must expose the real camera source");
 assert.match(live, /source-landscape/, "Mobile preview orientation must come from source dimensions");
 assert.match(live, /preview-stage/, "Live view must have a dedicated preview stage");
+assert.match(result, /stats\?\.status === "live"/, "Result player must wait for an actual live media path");
+assert.doesNotMatch(result, /stats\?\.mediaAvailable/, "A configured but idle MediaMTX path must not start the player");
 assert.match(styles, /body:has\(\.live-page\)/, "Mobile live view must disable page scrolling");
 assert.match(styles, /object-fit: cover/, "Mobile source preview must fill its portrait stage");
 assert.match(styles, /100cqh/, "Mobile landscape source preview must scale from the full stage");
@@ -44,6 +47,11 @@ assert.match(styles, /rotate\(-90deg\)/, "Mobile landscape preview must place th
 assert.match(publisher, /let writeQueue = Promise\.resolve\(\)/, "Encoded subgroups must be serialized per track");
 assert.match(publisher, /const transport = this\.#wt/, "Encoded writes must stay tied to their connection");
 assert.match(publisher, /this\.#writeData\(\s*transport,/, "Encoded subgroups must use the captured transport");
+assert.match(publisher, /getTransportQueueSize\(\)/, "Adaptive bitrate must observe the transport write queue");
+assert.match(publisher, /hardwareAcceleration: "prefer-hardware"/, "Video encoding must prefer hardware acceleration");
+assert.match(media, /hardwareAcceleration: "prefer-hardware"/, "Encoder preflight must prefer hardware acceleration");
+assert.doesNotMatch(media, /publisher\.getVideoEncoderQueueSize\(\)/, "Adaptive bitrate must not treat encoder queue as network pressure");
+assert.match(publisher, /unauthori\[sz\]ed/, "Publisher auth failures must not retry forever");
 assert.doesNotMatch(publisher, /fetch\(this\.#conf\.fingerprintUrl, \{\s*headers:/, "Fingerprint fetch must not send Authorization and trigger CORS preflight");
 
 console.log("camera exact preflight, direct media path, mobile camera layout, and fingerprint CORS checks: ok");
