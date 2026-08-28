@@ -29,6 +29,35 @@ export type Publisher = {
   getVideoEncoderQueueSize?: () => number | null;
 };
 
+export type MediaDeviceRequest = "camera" | "microphone" | "camera-microphone";
+
+export function mediaAccessError(error: unknown, request: MediaDeviceRequest): Error {
+  const name = error && typeof error === "object" && "name" in error ? String(error.name) : "";
+  const device = request === "camera" ? "kamera" : request === "microphone" ? "mikrofon" : "kamera/mikrofon";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return new Error(`Izin ${device} ditolak. Tekan ikon di kiri alamat Chrome → Izin situs → izinkan ${device}, lalu muat ulang halaman.`);
+  }
+  if (name === "NotFoundError") return new Error(`${device[0].toUpperCase()}${device.slice(1)} tidak ditemukan pada perangkat ini.`);
+  if (name === "NotReadableError" || name === "TrackStartError") return new Error(`${device[0].toUpperCase()}${device.slice(1)} sedang dipakai aplikasi lain.`);
+  if (error instanceof Error && error.message) return new Error(`${device[0].toUpperCase()}${device.slice(1)} tidak bisa dibuka: ${error.message}`);
+  return new Error(`${device[0].toUpperCase()}${device.slice(1)} tidak bisa dibuka.`);
+}
+
+export async function checkMicrophone(): Promise<MediaDeviceInfo[]> {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Audio API tidak tersedia. Pastikan halaman dibuka melalui HTTPS.");
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch (error) {
+    throw mediaAccessError(error, "microphone");
+  }
+  stream.getTracks().forEach((track) => track.stop());
+  return (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "audioinput");
+}
+
 const videoCandidates = [
   { key: "av1", label: "AV1", codec: "av01.0.04M.08", srtCompatible: false },
   { key: "vp9", label: "VP9", codec: "vp09.00.10.08", srtCompatible: false },
@@ -104,7 +133,7 @@ function sortedDimensions(width: number, height: number): [number, number] {
 }
 
 export async function openCapture(
-  input: Pick<StartStreamInput, "width" | "height" | "fps" | "audioEnabled" | "portraitMode"> & { deviceId?: string },
+  input: Pick<StartStreamInput, "width" | "height" | "fps" | "audioEnabled" | "portraitMode"> & { deviceId?: string; audioDeviceId?: string },
 ): Promise<CaptureSession> {
   assertBrowserMediaSupport(input.audioEnabled);
   const videoConstraints: MediaTrackConstraints = {
@@ -113,17 +142,23 @@ export async function openCapture(
     frameRate: { exact: input.fps },
   };
   if (input.deviceId) videoConstraints.deviceId = { exact: input.deviceId };
+  const audioConstraints: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  };
+  if (input.audioDeviceId) audioConstraints.deviceId = { exact: input.audioDeviceId };
 
   let sourceStream: MediaStream;
   try {
     sourceStream = await navigator.mediaDevices.getUserMedia({
       video: videoConstraints,
       audio: input.audioEnabled
-        ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        ? audioConstraints
         : false,
     });
   } catch (error) {
-    throw new Error(`Kamera/mikrofon tidak bisa dibuka: ${error instanceof Error ? error.message : String(error)}`);
+    throw mediaAccessError(error, input.audioEnabled ? "camera-microphone" : "camera");
   }
 
   const sourceTrack = sourceStream.getVideoTracks()[0];

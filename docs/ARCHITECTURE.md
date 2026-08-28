@@ -504,10 +504,17 @@ dari target symlink atau `VDO_PROJECT_DIR`. Setup memakai nama lineage tetap
 ### Volume dan certificate
 
 ```text
-/data                 SQLite dan recording
+/data                 mount dari ./data pada host; SQLite dan recording
+/data/app.db          database SQLite control plane
+/data/recordings/     file recording fMP4
 /certs/server.crt     certificate HTTPS
 /certs/server.key     private key
 ```
+
+Compose memakai bind mount `./data:/data`, bukan Docker named volume. Dengan
+demikian database dan recording tetap berada di luar writable layer image dan
+tetap ada setelah rebuild. Container berjalan sebagai UID/GID `10001`, lalu
+`setup.sh` menyiapkan ownership folder host tersebut.
 
 Production membutuhkan certificate valid untuk public domain. `PUBLIC_ORIGIN`
 boleh dipakai sebagai konfigurasi deployment untuk membatasi origin MoQ, tetapi

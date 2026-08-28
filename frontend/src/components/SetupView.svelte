@@ -18,12 +18,17 @@
   export let codecs: VideoCapability[] = [];
   export let audioCodecs: AudioCapability[] = [];
   export let devices: MediaDeviceInfo[] = [];
+  export let microphoneDevices: MediaDeviceInfo[] = [];
+  export let microphonePermission: "unknown" | "granted" | "denied" = "unknown";
+  export let microphoneChecking = false;
+  export let microphoneError = "";
   export let selectedCodec: "h264" | "h265" = "h265";
   export let detecting = false;
   export let starting = false;
   export let error = "";
   export let onDetect: () => void;
-  export let onStart: (input: StartStreamInput & { deviceId?: string }) => void;
+  export let onCheckMicrophone: () => void;
+  export let onStart: (input: StartStreamInput & { deviceId?: string; audioDeviceId?: string }) => void;
   export let onBack: () => void;
 
   const resolutions = [
@@ -39,6 +44,7 @@
   let audioEnabled = true;
   let record = false;
   let deviceId = "";
+  let audioDeviceId = "";
 
   $: selectedCapability = codecs.find((codec) => codec.key === selectedCodec);
   $: h264 = codecs.find((codec) => codec.key === "h264");
@@ -66,6 +72,7 @@
       audioEnabled: audioEnabled && audioReady,
       record,
       deviceId: deviceId || undefined,
+      audioDeviceId: audioDeviceId || undefined,
     });
   }
 </script>
@@ -81,7 +88,7 @@
       <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Siapkan output</h1>
       <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilih profile encoder di perangkat. Server hanya menerima hasil encode dan merelay ke OBS.</p>
     </div>
-    <button class="button-quiet flex items-center gap-2" type="button" on:click={onBack}>
+    <button class="button-quiet flex items-center gap-2" type="button" on:click={() => onBack()}>
       <span>Dashboard</span>
     </button>
   </header>
@@ -201,10 +208,43 @@
             <p id="bitrate-help" class="mt-2 text-xs font-semibold text-[var(--faint)]">Target mulai dari nilai ini. Adaptive bitrate hanya mengubah target, bukan codec, FPS, atau resolusi.</p>
           </div>
 
-          <label class="flex min-h-[52px] items-center gap-3 border border-[var(--border)] bg-[var(--surface-raised)] px-3">
-            <input class="size-5 accent-[var(--accent)]" type="checkbox" bind:checked={audioEnabled} disabled={!audioReady} />
-            <span class="flex items-center gap-2"><Mic size={17} /><span><span class="block text-sm font-bold">Audio</span><span class="block text-xs text-[var(--muted)]">{audioReady ? "AAC/Opus sesuai browser" : "Encoder audio belum tersedia"}</span></span></span>
-          </label>
+          <div>
+            <div class="flex flex-col gap-2 sm:flex-row">
+              <label class="flex min-h-[52px] min-w-0 flex-1 items-center gap-3 border border-[var(--border)] bg-[var(--surface-raised)] px-3">
+                <input class="size-5 accent-[var(--accent)]" type="checkbox" bind:checked={audioEnabled} disabled={!audioReady} />
+                <span class="flex min-w-0 items-center gap-2"><Mic size={17} class="shrink-0" /><span class="min-w-0"><span class="block text-sm font-bold">Audio</span><span class="block truncate text-xs text-[var(--muted)]">
+                  {#if !audioReady}
+                    Encoder audio belum tersedia
+                  {:else if microphonePermission === "granted"}
+                    Mikrofon diizinkan · {microphoneDevices.length} input
+                  {:else if microphonePermission === "denied"}
+                    Izin mikrofon diblokir
+                  {:else}
+                    Mikrofon belum dicek · AAC/Opus sesuai browser
+                  {/if}
+                </span></span></span>
+              </label>
+              <button class="button-secondary min-h-[52px] shrink-0" type="button" on:click={onCheckMicrophone} disabled={microphoneChecking || detecting || starting}>
+                {microphoneChecking ? "Mengecek..." : microphonePermission === "granted" ? "Cek lagi" : "Cek mic"}
+              </button>
+            </div>
+            {#if microphoneError}
+              <p class="mt-2 border border-[#844a52] bg-[#321c22] p-3 text-xs font-semibold leading-5 text-[var(--danger)]" role="alert">{microphoneError}</p>
+            {:else}
+              <p class="mt-2 text-xs font-semibold text-[var(--faint)]">Cek mic hanya meminta izin sebentar lalu menghentikan track; audio belum dikirim sebelum Start stream.</p>
+            {/if}
+            {#if microphoneDevices.length > 0}
+              <div class="mt-3">
+                <label for="microphone-device" class="mb-2 block text-sm font-bold">Mikrofon</label>
+                <select id="microphone-device" class="field w-full px-3" bind:value={audioDeviceId}>
+                  <option value="">Mikrofon default browser</option>
+                  {#each microphoneDevices as device, index}
+                    <option value={device.deviceId}>{device.label || `Mikrofon ${index + 1}`}</option>
+                  {/each}
+                </select>
+              </div>
+            {/if}
+          </div>
 
           <label class="flex min-h-[52px] items-center gap-3 border border-[var(--border)] bg-[var(--surface-raised)] px-3">
             <input class="size-5 accent-[var(--accent)]" type="checkbox" bind:checked={record} />
@@ -220,7 +260,7 @@
   </div>
 
   <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-    <button class="button-secondary" type="button" on:click={onBack}>Batalkan</button>
+    <button class="button-secondary" type="button" on:click={() => onBack()}>Batalkan</button>
     <button class="button-primary flex items-center justify-center gap-2 sm:min-w-[190px]" type="button" on:click={submit} disabled={starting || detecting || !selectedCapability?.supported || (audioEnabled && !audioReady)}>
       {#if starting}
         <RefreshCw size={17} class="animate-spin" /><span>Menyiapkan...</span>

@@ -18,9 +18,9 @@ cd vdo-relay
 ```
 
 Jika GitHub tidak mempertahankan executable bit saat repository dipush, jalankan
-sekali `chmod +x setup.sh`. Sebelum push, gunakan
-`git update-index --chmod=+x setup.sh` supaya clone berikutnya bisa langsung
-memakai `./setup.sh`.
+sekali `chmod +x setup.sh update.sh`. Sebelum push, gunakan
+`git update-index --chmod=+x setup.sh update.sh` supaya clone berikutnya bisa
+langsung memakai kedua script.
 
 Script akan menanyakan:
 
@@ -62,6 +62,21 @@ Script bisa dijalankan sebagai `root` atau sebagai user biasa yang memiliki
 akses `sudo`. Jika sudah login sebagai `root`, langsung jalankan
 `./setup.sh`; tidak perlu menambahkan `sudo`. Setelah setup selesai, logout/login
 sekali jika script memberi catatan membership group Docker belum aktif.
+
+## Update deployment
+
+Untuk deployment yang sudah pernah menjalankan setup:
+
+```bash
+./update.sh
+```
+
+`update.sh` melakukan `git pull --ff-only`, memeriksa key baru pada
+`.env.example`, lalu menjalankan `docker compose up -d --build`. Key environment
+yang sudah ada tidak diubah. Jika rilis menambahkan key baru, script akan
+memintanya secara interaktif. Perubahan source yang belum di-commit akan
+menghentikan update agar tidak tertimpa; file ignored seperti `.env`, `data/`,
+certificate, `node_modules`, dan `dist` tidak menghalangi pull.
 
 ## Domain dan arsitektur jaringan
 
@@ -189,7 +204,11 @@ docker compose up -d --build
 ```
 
 Login awal selalu `admin` / `admin` pada database baru. Password wajib diganti
-pada login pertama. SQLite dan recording berada pada Docker volume `vdo-data`.
+pada login pertama. SQLite dan recording berada di host pada bind mount:
+`data/app.db` dan `data/recordings/`. Folder `data/` di-ignore Git, sehingga
+`docker compose up -d --build` tidak menghapus database atau recording.
+Container menulis folder tersebut sebagai UID/GID `10001`; gunakan `sudo` bila
+ingin membaca atau menyalin file langsung dari host.
 
 Recording default disimpan sebagai fMP4 tanpa re-encode. Retention default
 adalah 24 jam dan path recording dibuat melalui MediaMTX Control API.
@@ -198,6 +217,7 @@ adalah 24 jam dan path recording dibuat melalui MediaMTX Control API.
 
 ```text
 setup.sh                             setup deployment Ubuntu satu perintah
+update.sh                            pull aman dan rebuild deployment
 frontend/src/App.svelte              flow dan state halaman
 frontend/src/components/             Login, Setup, Live, Result, Dashboard
 frontend/src/lib/media.ts            kamera, canvas, WebCodecs, bitrate adaptif
@@ -205,6 +225,7 @@ internal/app/                        Go API, auth, SQLite, MediaMTX control
 deploy/nginx/                        vhost HTTP awal untuk Certbot
 deploy/certbot/                      renewal hook certificate
 compose.yaml                         container dan port MediaMTX
+data/                                SQLite dan recording (bind mount, ignored)
 ```
 
 ## Push ke GitHub

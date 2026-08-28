@@ -75,7 +75,8 @@ native. Browser tidak memiliki akses UDP/SRT mentah.
 ### 4.2 Membuat stream
 
 1. Operator memilih `New stream`.
-2. Browser meminta izin kamera dan microphone.
+2. Browser menyediakan deteksi kamera dan tombol cek microphone terpisah;
+   Start stream meminta izin kamera dan microphone yang diperlukan.
 3. Browser mengecek dukungan codec dan konfigurasi encoder.
 4. Operator memilih kamera, microphone, codec, resolusi, FPS, bitrate maksimum,
    mode portrait, dan recording.
@@ -250,6 +251,8 @@ Gaya visual: flat dark operator console.
 Pesan error harus menyebutkan penyebab dan tindakan:
 
 - Kamera atau microphone ditolak: minta permission lalu retry.
+- Tombol `Cek mic` harus membuka permission microphone secara langsung,
+  menampilkan input audio yang terdeteksi, dan memberi instruksi izin Chrome.
 - HTTPS tidak tersedia: tampilkan instruksi domain/certificate.
 - Codec tidak didukung: pilih codec atau profile lain.
 - Resolusi/FPS tidak tersedia: pilih profile yang lebih rendah secara manual.
@@ -264,6 +267,8 @@ Pesan error harus menyebutkan penyebab dan tindakan:
 
 - Login default berhasil dan password wajib diganti pada login pertama.
 - Password baru bertahan setelah container restart.
+- SQLite dan recording tetap ada setelah image/container di-rebuild karena
+  `/data` di-bind mount ke folder host.
 - Pengguna anonim tidak dapat membuat stream atau membaca SRT.
 - H.264/H.265 yang lolos preflight dapat live ke MediaMTX.
 - VP8/VP9/AV1 dapat dideteksi dan diberi status kompatibilitas yang benar.

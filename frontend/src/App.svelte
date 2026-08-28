@@ -21,6 +21,8 @@
   } from "./lib/api";
   import {
     openCapture,
+    checkMicrophone,
+    mediaAccessError,
     probeAudioCodecs,
     probeVideoCodecs,
     startAdaptiveBitrate,
@@ -55,6 +57,10 @@
   let codecs: VideoCapability[] = [];
   let audioCodecs: AudioCapability[] = [];
   let cameraDevices: MediaDeviceInfo[] = [];
+  let microphoneDevices: MediaDeviceInfo[] = [];
+  let microphonePermission: "unknown" | "granted" | "denied" = "unknown";
+  let microphoneChecking = false;
+  let microphoneError = "";
   let selectedCodec: "h264" | "h265" = "h265";
   let streams: Stream[] = [];
   let recordings: Recording[] = [];
@@ -140,13 +146,33 @@
     try {
       await loadCapabilities();
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera API tidak tersedia. Pastikan halaman dibuka melalui HTTPS.");
-      const temporary = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      temporary.getTracks().forEach((track) => track.stop());
-      cameraDevices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "videoinput");
+      try {
+        const temporary = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        temporary.getTracks().forEach((track) => track.stop());
+        cameraDevices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "videoinput");
+      } catch (error) {
+        setupError = mediaAccessError(error, "camera").message;
+      }
+      await checkMicrophoneInput();
     } catch (error) {
       setupError = errorMessage(error, "Perangkat atau encoder belum bisa dideteksi.");
     } finally {
       detecting = false;
+    }
+  }
+
+  async function checkMicrophoneInput() {
+    microphoneChecking = true;
+    microphoneError = "";
+    try {
+      microphoneDevices = await checkMicrophone();
+      microphonePermission = "granted";
+    } catch (error) {
+      microphoneDevices = [];
+      microphonePermission = "denied";
+      microphoneError = errorMessage(error, "Mikrofon belum bisa dibuka.");
+    } finally {
+      microphoneChecking = false;
     }
   }
 
@@ -160,6 +186,12 @@
         setupError = errorMessage(error);
       }
     }
+  }
+
+  function showDashboard() {
+    setupError = "";
+    page = "dashboard";
+    void refreshDashboard();
   }
 
   async function refreshDashboard() {
@@ -178,7 +210,7 @@
     }
   }
 
-  async function handleStart(input: StartStreamInput & { deviceId?: string }) {
+  async function handleStart(input: StartStreamInput & { deviceId?: string; audioDeviceId?: string }) {
     startBusy = true;
     setupError = "";
     let capture: CaptureSession | null = null;
@@ -191,7 +223,7 @@
       if (!finalCapability) throw new Error(`Encoder ${input.codec.toUpperCase()} tidak mendukung ${input.width}×${input.height} pada ${input.fps} FPS.`);
 
       capture = await openCapture({ ...input });
-      const { deviceId: _deviceId, ...streamInput } = input;
+      const { deviceId: _deviceId, audioDeviceId: _audioDeviceId, ...streamInput } = input;
       created = await createStream(streamInput);
       const selectedAudio = audioCodecs.find((item) => item.supported && item.codec === "mp4a.40.2") || audioCodecs.find((item) => item.supported);
 
@@ -328,6 +360,9 @@
       codecs = [];
       audioCodecs = [];
       cameraDevices = [];
+      microphoneDevices = [];
+      microphonePermission = "unknown";
+      microphoneError = "";
     }
   }
 
@@ -345,7 +380,7 @@
 {:else if page === "password"}
   <PasswordView busy={passwordBusy} error={passwordError} onSubmit={handlePasswordChange} />
 {:else if page === "setup"}
-  <SetupView codecs={codecs} audioCodecs={audioCodecs} devices={cameraDevices} bind:selectedCodec detecting={detecting} starting={startBusy} error={setupError} onDetect={detectDevices} onStart={handleStart} onBack={() => (page = "dashboard")} />
+  <SetupView codecs={codecs} audioCodecs={audioCodecs} devices={cameraDevices} {microphoneDevices} {microphonePermission} {microphoneChecking} {microphoneError} bind:selectedCodec detecting={detecting} starting={startBusy} error={setupError} onDetect={detectDevices} onCheckMicrophone={checkMicrophoneInput} onStart={handleStart} onBack={showDashboard} />
 {:else if page === "result" && liveStream}
   <ResultView stream={liveStream} stats={liveStats} {publisherStatus} {targetBitrateKbps} onBack={() => (page = "live")} onStop={stopLive} />
 {:else if page === "live" && liveStream && captureSession}

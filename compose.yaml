@@ -4,6 +4,8 @@ services:
       context: .
       args:
         MEDIAMTX_VERSION: "1.20.1"
+        VDO_UID: "10001"
+        VDO_GID: "10001"
     restart: unless-stopped
     ports:
       # Nginx owns public 80/443. The Go app stays reachable only from localhost.
@@ -16,8 +18,6 @@ services:
       VDO_MOQ_PUBLIC_BASE_URL: ${VDO_MOQ_PUBLIC_BASE_URL:?set VDO_MOQ_PUBLIC_BASE_URL in .env}
       VDO_SRT_PUBLIC_HOST: ${VDO_SRT_PUBLIC_HOST:?set VDO_SRT_PUBLIC_HOST in .env}
     volumes:
-      - vdo-data:/data
+      # SQLite dan recording sengaja berada di host agar rebuild tidak menghapusnya.
+      - ./data:/data
       - ./certs:/certs:ro
-
-volumes:
-  vdo-data:

@@ -31,9 +31,12 @@ RUN curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MEDI
 
 FROM alpine:3.22
 
+ARG VDO_UID=10001
+ARG VDO_GID=10001
+
 RUN apk add --no-cache ca-certificates su-exec \
-  && addgroup -S vdo \
-  && adduser -S -G vdo vdo \
+  && addgroup -S -g "$VDO_GID" vdo \
+  && adduser -S -D -H -u "$VDO_UID" -G vdo vdo \
   && mkdir -p /data/recordings \
   && chown -R vdo:vdo /data
 
@@ -49,6 +52,5 @@ ENV VDO_DATA_DIR=/data \
   VDO_PUBLIC_ADDR=:8443 \
   VDO_INTERNAL_ADDR=127.0.0.1:8080
 
-VOLUME ["/data"]
 EXPOSE 8443/tcp 8892/tcp 8892/udp 8890/udp
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

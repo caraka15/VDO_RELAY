@@ -461,6 +461,14 @@ health_check() {
   return "$failures"
 }
 
+prepare_data_dir() {
+  log 'Menyiapkan folder data host untuk SQLite dan recording'
+  sudo install -d -m 0750 "$SCRIPT_DIR/data" "$SCRIPT_DIR/data/recordings"
+  # Container berjalan sebagai UID/GID tetap agar bind mount dapat ditulis
+  # tanpa menjalankan backend sebagai root.
+  sudo chown -R 10001:10001 "$SCRIPT_DIR/data"
+}
+
 main() {
   local existing_app
   local existing_media
@@ -524,6 +532,7 @@ main() {
   fi
   sudo certbot "${certbot_args[@]}" -d "$APP_DOMAIN" -d "$MEDIA_DOMAIN"
   install_certificate_and_hook
+  prepare_data_dir
 
   log 'Validasi compose dan build image'
   run_compose config >/dev/null
