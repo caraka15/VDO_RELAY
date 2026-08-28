@@ -67,6 +67,13 @@ Script memastikan perubahan source sudah bersih, menjalankan `git pull
 docker compose up -d --build
 ```
 
+Pada migrasi WHIP, `update.sh` tidak menjalankan `certbot --nginx`, tidak
+menimpa seluruh vhost, dan tidak mengubah `sites-enabled`. Jika menemukan
+blok media lama yang persis dikenali, script membuat backup di
+`/etc/nginx/sites-available/vdo-relay.backup.<timestamp>` lalu hanya mengganti
+`location /` ke upstream WHIP/WHEP. Jika konfigurasi sudah dikustomisasi atau
+tidak dikenali, update berhenti agar vhost diperiksa manual.
+
 File runtime `data/`, `certs/`, `tools/`, dan asset build lokal sudah di-ignore
 Git. SQLite dan recording berada di `./data`, jadi tidak hilang saat rebuild.
 
@@ -86,8 +93,11 @@ diperlukan OBS, sehingga keduanya tidak bisa digantikan oleh proxy HTTP Nginx.
 Control API, metrics, playback, dan callback auth hanya bind loopback di
 container.
 
-Template Nginx sengaja hanya berisi port 80. Certbot menambahkan blok HTTPS
-sendiri dan setup menyalin certificate yang sama ke `certs/` untuk MediaMTX.
+`deploy/nginx/vdo-relay.conf` adalah template instalasi awal dan sengaja hanya
+berisi port 80. Certbot menambahkan blok HTTPS sendiri dan setup menyalin
+certificate yang sama ke `certs/` untuk MediaMTX. Setelah itu, blok HTTPS yang
+diubah Certbot tetap berada di `/etc/nginx/sites-available/vdo-relay`; update
+tidak merender ulang file tersebut.
 
 ## Alur penggunaan
 
