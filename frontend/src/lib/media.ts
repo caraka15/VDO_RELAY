@@ -40,7 +40,7 @@ export function mediaAccessError(error: unknown, request: MediaDeviceRequest): E
   }
   if (name === "OverconstrainedError") {
     const constraint = error && typeof error === "object" && "constraint" in error ? String(error.constraint) : "resolusi/FPS";
-    return new Error(`Profile kamera tidak didukung pada ${constraint}. Stop job lalu buat stream baru dengan resolusi atau FPS lebih rendah.`);
+    return new Error(`Profile kamera tidak didukung pada ${constraint}. Pilih resolusi atau FPS lebih rendah lalu coba lagi.`);
   }
   if (name === "NotFoundError") return new Error(`${device[0].toUpperCase()}${device.slice(1)} tidak ditemukan pada perangkat ini.`);
   if (name === "NotReadableError" || name === "TrackStartError") return new Error(`${device[0].toUpperCase()}${device.slice(1)} sedang dipakai aplikasi lain.`);

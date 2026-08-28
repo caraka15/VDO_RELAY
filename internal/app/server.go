@@ -271,7 +271,7 @@ func (a *App) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 	a.streamMu.Lock()
 	defer a.streamMu.Unlock()
 	var active int
-	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM streams WHERE status IN ('connecting', 'live')`).Scan(&active); err != nil {
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM streams WHERE status IN ('ready', 'connecting', 'live')`).Scan(&active); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not inspect active streams", "database_error")
 		return
 	}
@@ -289,28 +289,20 @@ func (a *App) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pathName := "vdo-" + id
-	publishToken, err := randomToken(32)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create stream", "random_error")
-		return
-	}
-	readToken, err := randomToken(32)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create stream", "random_error")
-		return
-	}
+	publishToken := a.streamToken("publish", id)
+	readToken := a.streamToken("read", id)
 	if err := a.media.addPath(r.Context(), pathName, input.Record); err != nil {
 		writeError(w, http.StatusBadGateway, "could not configure media path", "media_config_error")
 		return
 	}
 	now := time.Now().UTC()
-	_, err = a.db.ExecContext(r.Context(), `INSERT INTO streams (id, path, status, codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at) VALUES (?, ?, 'connecting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, pathName, input.Codec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), streamTokenHash(publishToken), streamTokenHash(readToken), now.Unix())
+	_, err = a.db.ExecContext(r.Context(), `INSERT INTO streams (id, path, status, codec, width, height, fps, max_bitrate_kbps, current_bitrate_kbps, portrait_mode, audio_enabled, record, publish_token_hash, read_token_hash, created_at) VALUES (?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, pathName, input.Codec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), streamTokenHash(publishToken), streamTokenHash(readToken), now.Unix())
 	if err != nil {
 		_ = a.media.deletePath(context.Background(), pathName)
 		writeError(w, http.StatusInternalServerError, "could not save stream", "database_error")
 		return
 	}
-	response := a.responseForStream(streamRecord{ID: id, Path: pathName, Status: "connecting", Codec: input.Codec, Width: input.Width, Height: input.Height, FPS: input.FPS, MaxBitrateKbps: input.MaxBitrateKbps, CurrentBitrateKbps: input.MaxBitrateKbps, PortraitMode: input.PortraitMode, AudioEnabled: input.AudioEnabled, Record: input.Record, CreatedAt: now}, r, publishToken, readToken)
+	response := a.responseForStream(streamRecord{ID: id, Path: pathName, Status: "ready", Codec: input.Codec, Width: input.Width, Height: input.Height, FPS: input.FPS, MaxBitrateKbps: input.MaxBitrateKbps, CurrentBitrateKbps: input.MaxBitrateKbps, PortraitMode: input.PortraitMode, AudioEnabled: input.AudioEnabled, Record: input.Record, CreatedAt: now}, r, publishToken, readToken)
 	writeJSON(w, http.StatusCreated, response)
 }
 
@@ -358,6 +350,10 @@ func (a *App) publicStreamResponse(stream streamRecord) streamResponse {
 	return streamResponse{ID: stream.ID, Path: stream.Path, Status: stream.Status, Codec: stream.Codec, Width: stream.Width, Height: stream.Height, FPS: stream.FPS, MaxBitrateKbps: stream.MaxBitrateKbps, CurrentBitrateKbps: stream.CurrentBitrateKbps, PortraitMode: stream.PortraitMode, AudioEnabled: stream.AudioEnabled, Record: stream.Record, CreatedAt: stream.CreatedAt, Error: stream.Error}
 }
 
+func (a *App) privateStreamResponse(stream streamRecord, r *http.Request) streamResponse {
+	return a.responseForStream(stream, r, a.streamToken("publish", stream.ID), a.streamToken("read", stream.ID))
+}
+
 func (a *App) handleListStreams(w http.ResponseWriter, r *http.Request) {
 	if _, ok := a.requireUser(w, r); !ok {
 		return
@@ -391,6 +387,10 @@ func (a *App) handleStreamRoute(w http.ResponseWriter, r *http.Request) {
 		a.handleStopStream(w, r, parts[0])
 		return
 	}
+	if len(parts) == 1 && r.Method == http.MethodPatch {
+		a.handleUpdateStream(w, r, parts[0])
+		return
+	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		stream, err := getStream(r.Context(), a.db, parts[0])
 		if errors.Is(err, sql.ErrNoRows) {
@@ -401,10 +401,66 @@ func (a *App) handleStreamRoute(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not load stream", "database_error")
 			return
 		}
-		writeJSON(w, http.StatusOK, a.publicStreamResponse(stream))
+		if !openStreamStatus(stream.Status) {
+			writeJSON(w, http.StatusOK, a.publicStreamResponse(stream))
+			return
+		}
+		writeJSON(w, http.StatusOK, a.privateStreamResponse(stream, r))
 		return
 	}
 	http.NotFound(w, r)
+}
+
+func (a *App) handleUpdateStream(w http.ResponseWriter, r *http.Request, id string) {
+	if !sameOrigin(r) {
+		writeError(w, http.StatusForbidden, "request origin is not allowed", "origin_denied")
+		return
+	}
+	var input createStreamRequest
+	if err := decodeJSON(w, r, &input); err != nil {
+		return
+	}
+	input.Codec = strings.ToLower(input.Codec)
+	if err := input.validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_stream")
+		return
+	}
+	a.streamMu.Lock()
+	defer a.streamMu.Unlock()
+	stream, err := getStream(r.Context(), a.db, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "stream not found", "not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load stream", "database_error")
+		return
+	}
+	if !openStreamStatus(stream.Status) {
+		writeError(w, http.StatusConflict, "closed stream cannot be updated", "stream_closed")
+		return
+	}
+	if err := a.media.ensurePath(r.Context(), stream.Path, input.Record); err != nil {
+		writeError(w, http.StatusBadGateway, "could not update media path", "media_config_error")
+		return
+	}
+	_, err = a.db.ExecContext(r.Context(), `UPDATE streams SET status = 'ready', codec = ?, width = ?, height = ?, fps = ?, max_bitrate_kbps = ?, current_bitrate_kbps = ?, portrait_mode = ?, audio_enabled = ?, record = ?, error = '' WHERE id = ?`, input.Codec, input.Width, input.Height, input.FPS, input.MaxBitrateKbps, input.MaxBitrateKbps, boolInt(input.PortraitMode), boolInt(input.AudioEnabled), boolInt(input.Record), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update stream", "database_error")
+		return
+	}
+	stream.Status = "ready"
+	stream.Codec = input.Codec
+	stream.Width = input.Width
+	stream.Height = input.Height
+	stream.FPS = input.FPS
+	stream.MaxBitrateKbps = input.MaxBitrateKbps
+	stream.CurrentBitrateKbps = input.MaxBitrateKbps
+	stream.PortraitMode = input.PortraitMode
+	stream.AudioEnabled = input.AudioEnabled
+	stream.Record = input.Record
+	stream.Error = ""
+	writeJSON(w, http.StatusOK, a.privateStreamResponse(stream, r))
 }
 
 func (a *App) handleStopStream(w http.ResponseWriter, r *http.Request, id string) {
@@ -427,7 +483,6 @@ func (a *App) handleStopStream(w http.ResponseWriter, r *http.Request, id string
 		writeJSON(w, http.StatusOK, a.publicStreamResponse(stream))
 		return
 	}
-	mediaErr := a.media.deletePath(r.Context(), stream.Path)
 	now := time.Now().UTC()
 	_, err = a.db.Exec(`UPDATE streams SET status = 'stopped', stopped_at = ?, publish_token_hash = '', read_token_hash = '' WHERE id = ?`, now.Unix(), id)
 	if err != nil {
@@ -438,6 +493,7 @@ func (a *App) handleStopStream(w http.ResponseWriter, r *http.Request, id string
 	stream.StoppedAt = &now
 	stream.PublishTokenHash = ""
 	stream.ReadTokenHash = ""
+	mediaErr := a.media.deletePath(r.Context(), stream.Path)
 	if mediaErr != nil {
 		writeError(w, http.StatusBadGateway, "stream token revoked, but media path cleanup failed", "media_config_error")
 		return
@@ -457,9 +513,15 @@ func (a *App) handleStreamStats(w http.ResponseWriter, r *http.Request, id strin
 	}
 	mediaStats, mediaErr := a.media.pathStats(r.Context(), stream.Path)
 	status := stream.Status
-	if mediaErr == nil && mediaStats.Ready && status == "connecting" {
-		status = "live"
-		_, _ = a.db.ExecContext(r.Context(), `UPDATE streams SET status = 'live' WHERE id = ? AND status = 'connecting'`, id)
+	if mediaErr == nil && openStreamStatus(status) {
+		nextStatus := "ready"
+		if mediaStats.Ready {
+			nextStatus = "live"
+		}
+		if nextStatus != status {
+			status = nextStatus
+			_, _ = a.db.ExecContext(r.Context(), `UPDATE streams SET status = ? WHERE id = ?`, status, id)
+		}
 	}
 	var received *int
 	if mediaErr == nil {
@@ -489,7 +551,7 @@ func (a *App) handleStreamStats(w http.ResponseWriter, r *http.Request, id strin
 			}
 			return 0
 		}(),
-		"recording":      stream.Record && mediaErr == nil,
+		"recording":      stream.Record && mediaErr == nil && mediaStats.Ready,
 		"mediaAvailable": mediaErr == nil,
 	})
 }
@@ -605,7 +667,7 @@ func (a *App) handleMediaAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	stream, err := getStreamByPath(r.Context(), a.db, input.Path)
-	if err != nil || stream.Status == "stopped" || stream.Status == "failed" {
+	if err != nil || !openStreamStatus(stream.Status) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}

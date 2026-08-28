@@ -133,6 +133,13 @@ func (m *mediaManager) patchPath(ctx context.Context, path string, record bool) 
 	return m.control(ctx, http.MethodPatch, "/v3/config/paths/patch/"+url.PathEscape(path), pathConfig{Record: record})
 }
 
+func (m *mediaManager) ensurePath(ctx context.Context, path string, record bool) error {
+	if err := m.patchPath(ctx, path, record); err == nil {
+		return nil
+	}
+	return m.addPath(ctx, path, record)
+}
+
 func (m *mediaManager) control(ctx context.Context, method, endpoint string, payload any) error {
 	var body *bytes.Reader
 	if payload == nil {
@@ -178,6 +185,9 @@ func (m *mediaManager) pathStats(ctx context.Context, path string) (mediaPathSta
 		return mediaPathStats{}, err
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return mediaPathStats{}, nil
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return mediaPathStats{}, fmt.Errorf("MediaMTX path API returned %s", response.Status)
 	}
@@ -195,7 +205,6 @@ func (m *mediaManager) pathStats(ctx context.Context, path string) (mediaPathSta
 func (m *mediaManager) configText() string {
 	cert := yamlString(m.cfg.TLSCertFile)
 	key := yamlString(m.cfg.TLSKeyFile)
-	allowOrigins := yamlOrigins(m.cfg.PublicOrigin, m.cfg.MoQPublicBaseURL)
 	recordPath := yamlString(filepath.ToSlash(filepath.Join(m.cfg.DataDir, "recordings", "%path", "%Y-%m-%d_%H-%M-%S-%f")))
 	authURL := yamlString("http://" + m.cfg.InternalAddr + "/internal/media-auth")
 	return fmt.Sprintf(`logLevel: info
@@ -214,7 +223,7 @@ moqHTTP2Address: :8892
 moqHTTP3Address: :8892
 moqServerCert: %s
 moqServerKey: %s
-moqAllowOrigins: %s
+moqAllowOrigins: ["*"]
 
 api: true
 apiAddress: 127.0.0.1:9997
@@ -233,45 +242,16 @@ authHTTPExclude:
 
 pathDefaults:
   record: false
+  maxReaders: 1
   recordPath: %s
   recordFormat: fmp4
   recordPartDuration: 1s
   recordSegmentDuration: 10m
   recordDeleteAfter: 24h
-`, cert, key, allowOrigins, authURL, recordPath)
-}
 
-func yamlOrigins(values ...string) string {
-	origins := make([]string, 0, len(values))
-	for _, value := range values {
-		origin := urlOrigin(value)
-		if origin == "" {
-			continue
-		}
-		duplicate := false
-		for _, existing := range origins {
-			if strings.EqualFold(existing, origin) {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate {
-			origins = append(origins, origin)
-		}
-	}
-	quoted := make([]string, 0, len(origins))
-	for _, origin := range origins {
-		quoted = append(quoted, yamlString(origin))
-	}
-	return "[" + strings.Join(quoted, ", ") + "]"
-}
-
-func urlOrigin(value string) string {
-	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return ""
-	}
-	return parsed.Scheme + "://" + parsed.Host
+paths:
+  all_others:
+`, cert, key, authURL, recordPath)
 }
 
 func yamlString(value string) string {

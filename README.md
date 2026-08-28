@@ -80,8 +80,9 @@ certificate, `node_modules`, dan `dist` tidak menghalangi pull.
 
 ## Domain dan arsitektur jaringan
 
-Gunakan dua hostname. `api.example.com` tidak diperlukan karena frontend dan
-API disajikan Go pada origin yang sama; cookie session tidak memerlukan CORS.
+Gunakan dua hostname. Nama `app.example.com` dan `media.example.com` di bawah
+hanya contoh; hostname web tidak harus memakai prefix `app`. `api.example.com`
+tidak diperlukan karena frontend dan API disajikan Go pada origin yang sama.
 
 ```text
 app.example.com    -> Nginx :443 -> Go + Svelte :8443
@@ -111,6 +112,9 @@ VDO_SRT_PUBLIC_HOST=media.example.com
 
 Jangan menaruh dua domain dalam satu variable. `.env` tidak di-commit.
 Script membuat backup `.env` lama sebelum memperbarui tiga variable tersebut.
+MediaMTX menerima CORS MoQ dari origin mana pun (`moqAllowOrigins: ["*"]`),
+sehingga alias domain web juga dapat mengambil fingerprint. Publish/read tetap
+dilindungi token; wildcard CORS tidak membuat stream menjadi anonim.
 
 ## Nginx, TLS, dan renewal
 
@@ -149,13 +153,18 @@ Setup tidak mengubah UFW secara otomatis untuk menghindari mengunci akses SSH.
 3. Buka form stream baru; deteksi device/microphone dapat dijalankan bila perlu.
 4. Pilih H.264 atau H.265, resolusi, FPS, bitrate maksimum, audio, portrait,
    dan recording.
-5. Tekan **Create stream** untuk membuat job dan URL tanpa membuka kamera.
-6. Di halaman kontrol, atur framing lalu tekan **Start camera & relay**.
-7. Saat live, buka **Result**.
+5. Tekan **Create stream**. Browser membuka kamera sementara untuk menguji
+   kombinasi codec/resolusi/FPS; API hanya membuat job jika pengujian lolos.
+6. Di halaman kontrol, tekan **Start camera & relay**.
+7. Untuk mengganti resolusi/FPS, tekan **Stop relay**, ubah profile, lalu Start
+   lagi. Path, token read, dan URL OBS tidak berubah.
+8. Gunakan **Close job** hanya ketika URL OBS memang ingin dicabut permanen.
+9. Job yang masih terbuka dapat dibuka kembali dari dashboard setelah refresh.
 
 Label codec pada setup adalah hasil probe encoder browser `1280x720/30`, bukan
-klaim hardware encoder atau profile kamera. Resolusi dan FPS kamera aktual baru
-diverifikasi saat Start dan ditolak bila lebih rendah atau tidak dilaporkan.
+klaim hardware encoder. Browser tidak menyediakan daftar kombinasi profile
+kamera yang pasti, sehingga kombinasi pilihan diuji langsung sebelum job dibuat
+dan diperiksa ulang pada setiap Start.
 
 Halaman Result menyediakan:
 
@@ -184,8 +193,9 @@ SRT URL berbentuk:
 srt://media.example.com:8890?streamid=read:<path>:user:<token>&latency=2000000&pkt_size=1316
 ```
 
-Token read hanya diberikan kepada operator yang membuat stream dan dicabut
-saat stream dihentikan. Jangan membagikan URL tersebut sembarangan.
+Token read tersedia kembali bagi operator yang login dan tetap sama ketika relay
+di-Stop/Start. Token baru dicabut saat **Close job**. Jangan membagikan URL
+tersebut sembarangan.
 
 ### Health check
 
@@ -211,13 +221,14 @@ docker compose up -d --build
 
 Login awal selalu `admin` / `admin` pada database baru. Password wajib diganti
 pada login pertama. SQLite dan recording berada di host pada bind mount:
-`data/app.db` dan `data/recordings/`. Folder `data/` di-ignore Git, sehingga
+`data/app.db`, `data/token.key`, dan `data/recordings/`. Folder `data/` di-ignore Git, sehingga
 `docker compose up -d --build` tidak menghapus database atau recording.
 Container menulis folder tersebut sebagai UID/GID `10001`; gunakan `sudo` bila
 ingin membaca atau menyalin file langsung dari host.
 
-Recording default disimpan sebagai fMP4 tanpa re-encode. Retention default
-adalah 24 jam dan path recording dibuat melalui MediaMTX Control API.
+Recording default disimpan sebagai fMP4 tanpa re-encode. Nama file memakai
+tanggal, jam, dan mikrodetik waktu segment dimulai, jadi Start/reconnect berikutnya
+tidak menimpa file lama. Retention default 24 jam.
 
 ## Struktur project
 

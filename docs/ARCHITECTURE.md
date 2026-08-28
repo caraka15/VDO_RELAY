@@ -26,8 +26,9 @@ media.example.com  -> MediaMTX :8892 TCP/UDP dan :8890 UDP
 ```
 
 Frontend dan API sengaja satu origin supaya cookie session tidak memerlukan
-CORS. `api.example.com` baru diperlukan jika API dan frontend benar-benar
-dipisah menjadi deployment berbeda. `VDO_PUBLIC_ORIGIN` membatasi origin MoQ;
+CORS. Nama hostname bebas; prefix `app` dan `media` hanya contoh. MediaMTX MoQ
+memakai `moqAllowOrigins: ["*"]` agar fingerprint dapat diambil dari alias web
+mana pun, sedangkan publish/read tetap diwajibkan membawa token.
 `VDO_MOQ_PUBLIC_BASE_URL` dan `VDO_SRT_PUBLIC_HOST` menentukan hostname media.
 Nginx hanya menangani domain web dan ACME HTTP challenge. Nginx tidak menjadi
 proxy untuk SRT atau WebTransport.
@@ -70,23 +71,26 @@ deployment semuanya berada dalam satu container.
 
 ### 3.1 Browser ke MediaMTX
 
-1. Svelte memanggil `POST /api/streams`; backend membuat path, publish token,
-   read token, SRT URL, dan player URL tanpa membuka kamera.
-2. Halaman kontrol masuk ke state `ready` dan menampilkan preview kosong.
-3. Setelah operator menekan Start, browser memeriksa konfigurasi encoder pilihan
-   melalui `VideoEncoder.isConfigSupported()` lalu meminta `getUserMedia()`.
-4. Browser membandingkan metadata resolusi dan FPS track aktual dengan profile.
+1. Svelte memeriksa konfigurasi encoder pilihan melalui
+   `VideoEncoder.isConfigSupported()`, membuka kamera sementara, dan membandingkan
+   metadata resolusi/FPS aktual dengan profile.
+2. Hanya jika preflight lulus, Svelte memanggil `POST /api/streams`; backend
+   membuat path, token stabil, SRT URL, dan player URL.
+3. Halaman kontrol masuk ke state `ready` dan menampilkan profile teruji.
+4. Setelah operator menekan Start, browser mengulangi preflight untuk menghadapi
+   perubahan kondisi perangkat.
+5. Browser membandingkan metadata resolusi dan FPS track aktual dengan profile.
    Profile ditolak jika metadata hilang atau lebih rendah; tidak ada fallback ke
    nilai yang diminta.
-5. `MediaStreamTrackProcessor` membaca frame kamera.
-6. Frame digambar ke canvas output berukuran tetap 16:9.
-7. Canvas menghasilkan frame portrait/landscape yang sudah memiliki black bar
+6. `MediaStreamTrackProcessor` membaca frame kamera.
+7. Frame digambar ke canvas output berukuran tetap 16:9.
+8. Canvas menghasilkan frame portrait/landscape yang sudah memiliki black bar
    bila diperlukan.
-8. `VideoEncoder` menghasilkan H.264 atau H.265.
-9. `AudioEncoder` menghasilkan AAC atau Opus bila audio aktif.
-10. Encoded chunks dikirim melalui publisher Media-over-QUIC resmi MediaMTX
+9. `VideoEncoder` menghasilkan H.264 atau H.265.
+10. `AudioEncoder` menghasilkan AAC atau Opus bila audio aktif.
+11. Encoded chunks dikirim melalui publisher Media-over-QUIC resmi MediaMTX
    yang divendor dari release yang dipin.
-11. MediaMTX menerima encoded media pada path stream.
+12. MediaMTX menerima encoded media pada path stream.
 
 Media-over-QUIC membutuhkan HTTPS serta akses TCP dan UDP pada port yang sama.
 Browser publishing saat ini diarahkan ke Chrome karena pipeline publishing
@@ -120,7 +124,7 @@ MediaMTX mendokumentasikan format token SRT sebagai password pada stream ID.
 - Membaca stats MediaMTX dan menghitung bitrate dari perubahan byte.
 - Menyajikan daftar dan download recording.
 - Menjalankan serta memantau child process MediaMTX.
-- Menjaga limit 8 stream aktif.
+- Menjaga limit 8 job terbuka.
 
 ### 4.2 Listener
 
@@ -155,6 +159,7 @@ POST /api/auth/password
 POST /api/streams
 GET  /api/streams
 GET  /api/streams/{id}
+PATCH /api/streams/{id}
 GET  /api/streams/{id}/stats
 POST /api/streams/{id}/stop
 
@@ -186,18 +191,18 @@ Response mengembalikan:
   "path": "vdo-stream-id",
   "publishUrl": "https://media.example.com:8892/vdo-stream-id",
   "fingerprintUrl": "https://media.example.com:8892/vdo-stream-id/fingerprint",
-  "publishToken": "shown-once-to-the-browser",
+  "publishToken": "reusable-job-token",
   "srtUrl": "srt://host:8890?streamid=read:...",
   "playerUrl": "https://media.example.com:8892/vdo-stream-id?token=...&autoplay=true&muted=true",
-  "status": "connecting",
+  "status": "ready",
   "record": false
 }
 ```
 
-`publishUrl`, `srtUrl`, dan `playerUrl` hanya dikirim setelah session operator
-tervalidasi. `playerUrl` adalah halaman player MoQ bawaan MediaMTX dan dapat
-dipakai langsung sebagai `iframe src`. Read token tidak ditulis ke log aplikasi
-dan dicabut saat stream dihentikan.
+`GET /api/streams/{id}` mengembalikan kembali URL/token job terbuka kepada
+operator terautentikasi. `PATCH /api/streams/{id}` menyimpan profile baru tanpa
+mengganti path atau token. `playerUrl` dapat dipakai langsung sebagai
+`iframe src`. Token tidak ditulis ke log dan hanya dicabut oleh Close job.
 
 `GET /api/streams/{id}/stats` mengembalikan:
 
@@ -292,10 +297,12 @@ path stream dan MediaMTX Playback API, sehingga metadata tidak diduplikasi.
 - Setiap stream memakai path random dengan entropy tinggi.
 - Publish token dan read token berbeda.
 - Database hanya menyimpan hash token.
+- Token dapat diturunkan ulang dengan HMAC dari secret random `/data/token.key`;
+  secret dan SQLite bertahan pada bind mount, sehingga URL stabil setelah restart.
 - MoQ publish mengirim capability token sebagai Bearer token pada WebTransport.
 - SRT read memakai token sebagai password pada stream ID.
-- Token aktif selama stream berjalan dan dicabut saat stream dihentikan.
-- Path dihapus dari MediaMTX saat stream selesai.
+- Token aktif selama job terbuka dan tidak dicabut oleh Stop relay.
+- Path hanya dihapus dari MediaMTX saat Close job.
 - MediaMTX Control API, metrics, dan playback tidak boleh public.
 
 SRT URL adalah bearer credential. UI harus menggunakan `Referrer-Policy:
@@ -314,6 +321,7 @@ moqHTTP2Address: :8892
 moqHTTP3Address: :8892
 moqServerKey: /certs/server.key
 moqServerCert: /certs/server.crt
+moqAllowOrigins: ["*"]
 
 srt: true
 srtAddress: :8890
@@ -331,11 +339,15 @@ authHTTPAddress: http://127.0.0.1:8080/internal/media-auth
 
 pathDefaults:
   record: false
+  maxReaders: 1
   recordPath: /data/recordings/%path/%Y-%m-%d_%H-%M-%S-%f
   recordFormat: fmp4
   recordPartDuration: 1s
   recordSegmentDuration: 10m
   recordDeleteAfter: 24h
+
+paths:
+  all_others:
 ```
 
 `authHTTPExclude` mengecualikan API, metrics, pprof, dan playback karena
@@ -346,8 +358,8 @@ seluruhnya dibatasi ke loopback.
 Backend melakukan:
 
 1. Validasi session dan limit 8 stream.
-2. Generate stream ID, path, publish token, dan read token.
-3. Simpan hash metadata ke SQLite.
+2. Generate stream ID/path dan turunkan publish/read token stabil memakai HMAC.
+3. Simpan hanya hash token serta metadata ke SQLite.
 4. Memanggil:
 
    ```text
@@ -363,22 +375,24 @@ restart. [Control API path operations](https://github.com/bluenviron/mediamtx/bl
 
 ### 7.3 Stats
 
-Backend polling Control API atau metrics setiap 2 detik untuk stream aktif.
+Frontend polling endpoint stats setiap 2 detik; backend membaca Control API
+MediaMTX saat request diterima.
 Bitrate dihitung dari delta inbound/outbound bytes, bukan dari satu sample.
 MediaMTX menyediakan byte counters yang dapat dipakai untuk perhitungan ini.
 [MediaMTX metrics](https://mediamtx.org/docs/features/metrics)
 
-### 7.4 Stop and cleanup
+### 7.4 Stop relay, reuse, dan cleanup
 
-1. Tandai stream stopping.
-2. Tunggu MediaMTX menutup recording part aktif bila ada.
-3. Cabut token di database.
-4. Panggil `DELETE /v3/config/paths/delete/{path}`.
-5. Tandai stream stopped.
+1. Stop relay hanya menutup resource browser; job kembali `ready`.
+2. Profile dapat diubah melalui `PATCH /api/streams/{id}` sebelum Start berikutnya.
+3. Start berikutnya memakai path, read token, dan SRT URL yang sama; OBS hanya
+   mengalami interupsi/reconnect, bukan membutuhkan URL baru.
+4. Close job mencabut hash token, memanggil
+   `DELETE /v3/config/paths/delete/{path}`, lalu menandai job `stopped`.
 
-Jika MediaMTX mati, backend memberi status `failed`, mencatat alasan, dan
-menjalankan restart dengan backoff. Backend tidak membuat stream baru secara
-otomatis.
+Jika MediaMTX mati, child process direstart dengan backoff. Konfigurasi
+`all_others` membuat path bertoken tetap dapat dipakai; Start/PATCH berikutnya
+memastikan kembali konfigurasi recording path khusus.
 
 ## 8. Browser encoder dan adaptive bitrate
 
@@ -512,6 +526,7 @@ dari target symlink atau `VDO_PROJECT_DIR`. Setup memakai nama lineage tetap
 ```text
 /data                 mount dari ./data pada host; SQLite dan recording
 /data/app.db          database SQLite control plane
+/data/token.key       secret HMAC untuk memulihkan token job
 /data/recordings/     file recording fMP4
 /certs/server.crt     certificate HTTPS
 /certs/server.key     private key
@@ -522,10 +537,10 @@ demikian database dan recording tetap berada di luar writable layer image dan
 tetap ada setelah rebuild. Container berjalan sebagai UID/GID `10001`, lalu
 `setup.sh` menyiapkan ownership folder host tersebut.
 
-Production membutuhkan certificate valid untuk public domain. `PUBLIC_ORIGIN`
-boleh dipakai sebagai konfigurasi deployment untuk membatasi origin MoQ, tetapi
-credential dashboard tetap berasal dari database/constant seed, bukan environment
-variable.
+Production membutuhkan certificate valid untuk public domain. CORS MoQ wildcard
+hanya mengizinkan browser membaca respons lintas-origin; callback auth tetap
+menolak publish/read tanpa token yang cocok. Credential dashboard tetap berasal
+dari database/constant seed, bukan environment variable.
 
 ### Port mapping
 

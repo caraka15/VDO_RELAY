@@ -50,8 +50,8 @@
       <button class="button-secondary flex items-center gap-2" type="button" on:click={onBack}>
         <ArrowLeft size={17} /><span>Live monitor</span>
       </button>
-      <button class="button-danger flex items-center gap-2" type="button" on:click={onStop}>
-        <CircleStop size={18} /><span>Stop</span>
+      <button class="button-secondary flex items-center gap-2" type="button" on:click={onStop} disabled={publisherStatus === "ready"}>
+        <CircleStop size={18} /><span>Stop relay</span>
       </button>
     </div>
   </header>

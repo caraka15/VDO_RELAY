@@ -7,7 +7,7 @@ export type Session = {
 export type Stream = {
   id: string;
   path: string;
-  status: "connecting" | "live" | "stopped" | "failed";
+  status: "ready" | "connecting" | "live" | "stopped" | "failed";
   codec: "h264" | "h265";
   width: number;
   height: number;
@@ -127,6 +127,15 @@ export const listStreams = async () => (await request<Stream[] | null>("/api/str
 export const createStream = (input: StartStreamInput) =>
   request<Stream>("/api/streams", {
     method: "POST",
+    body: JSON.stringify(input),
+  });
+
+export const getStream = (id: string) =>
+  request<Stream>(`/api/streams/${encodeURIComponent(id)}`);
+
+export const updateStream = (id: string, input: StartStreamInput) =>
+  request<Stream>(`/api/streams/${encodeURIComponent(id)}`, {
+    method: "PATCH",
     body: JSON.stringify(input),
   });
 

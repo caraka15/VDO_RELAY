@@ -7,12 +7,14 @@
     createStream,
     deleteRecording,
     getSession,
+    getStream,
     getStreamStats,
     listRecordings,
     listStreams,
     login,
     logout,
     stopStream,
+    updateStream,
     type Recording,
     type Session,
     type StartStreamInput,
@@ -42,6 +44,7 @@
   type Page = "login" | "password" | "dashboard" | "setup" | "live" | "result";
   type PreparedStreamInput = StartStreamInput & { deviceId?: string; audioDeviceId?: string };
   type PublisherStatus = "ready" | "connecting" | "live" | "error";
+  type VerifiedProfile = Pick<CaptureSession, "actualWidth" | "actualHeight" | "actualFps">;
 
   let page: Page = "login";
   let session: Session | null = null;
@@ -80,10 +83,11 @@
   let publisherError = "";
   let targetBitrateKbps = 0;
   let copied = false;
+  let verifiedProfile: VerifiedProfile | null = null;
 
   onMount(() => {
     void bootstrap();
-    return () => cleanupLive(true);
+    return cleanupLive;
   });
 
   async function bootstrap() {
@@ -220,8 +224,9 @@
     createBusy = true;
     setupError = "";
     try {
-      const capability = codecs.find((item) => item.key === input.codec && item.supported && item.srtCompatible);
-      if (!capability) throw new Error(`${input.codec.toUpperCase()} tidak lolos capability check browser.`);
+      const { capture } = await openValidatedCapture(input);
+      verifiedProfile = { actualWidth: capture.actualWidth, actualHeight: capture.actualHeight, actualFps: capture.actualFps };
+      capture.stop();
       const { deviceId: _deviceId, audioDeviceId: _audioDeviceId, ...streamInput } = input;
       liveStream = await createStream(streamInput);
       preparedInput = input;
@@ -238,6 +243,46 @@
     }
   }
 
+  async function openValidatedCapture(input: PreparedStreamInput) {
+    const finalProbe = await probeVideoCodecs(input.width, input.height, input.fps);
+    const capability = finalProbe.find((item) => item.key === input.codec && item.supported && item.srtCompatible);
+    if (!capability) {
+      throw new Error(`Encoder ${input.codec.toUpperCase()} tidak mendukung ${input.width}×${input.height} pada ${input.fps} FPS. Pilih profile lebih rendah.`);
+    }
+    return { capability, capture: await openCapture(input) };
+  }
+
+  async function handleOpenStream(summary: Stream) {
+    dashboardError = "";
+    try {
+      if (codecs.length === 0 || audioCodecs.length === 0) await loadCapabilities();
+      const stream = await getStream(summary.id);
+      if (!stream.publishUrl || !stream.publishToken || !stream.srtUrl) {
+        throw new Error("Job ini sudah ditutup dan tidak dapat digunakan lagi.");
+      }
+      cleanupLive();
+      liveStream = stream;
+      preparedInput = {
+        codec: stream.codec,
+        width: stream.width,
+        height: stream.height,
+        fps: stream.fps,
+        maxBitrateKbps: stream.maxBitrateKbps,
+        portraitMode: stream.portraitMode,
+        audioEnabled: stream.audioEnabled,
+        record: stream.record,
+      };
+      targetBitrateKbps = stream.maxBitrateKbps;
+      publisherStatus = "ready";
+      publisherError = "";
+      verifiedProfile = null;
+      page = "live";
+      startStatsPolling();
+    } catch (error) {
+      dashboardError = errorMessage(error, "Job stream belum bisa dibuka.");
+    }
+  }
+
   async function handlePublishStart() {
     if (!liveStream || !preparedInput || publishBusy || publisher || captureSession) return;
     const stream = liveStream;
@@ -249,35 +294,38 @@
     let startedPublisher: Publisher | null = null;
     try {
       if (!stream.publishUrl || !stream.publishToken) {
-        throw new Error("Job stream tidak memiliki URL atau token publish. Stop job lalu buat ulang.");
+        throw new Error("Job stream tidak memiliki URL atau token publish. Buka ulang job dari dashboard.");
       }
-      const finalProbe = await probeVideoCodecs(input.width, input.height, input.fps);
-      const finalCapability = finalProbe.find((item) => item.key === input.codec && item.supported && item.srtCompatible);
-      if (!finalCapability) {
-        throw new Error(`Encoder ${input.codec.toUpperCase()} tidak mendukung ${input.width}×${input.height} pada ${input.fps} FPS. Stop job lalu buat ulang dengan profile lebih rendah.`);
-      }
-      if (liveStream?.id !== stream.id) return;
-
-      capture = await openCapture(input);
+      const validated = await openValidatedCapture(input);
+      capture = validated.capture;
       if (liveStream?.id !== stream.id) {
         capture.stop();
         return;
       }
-      captureSession = capture;
+
       const { deviceId: _deviceId, audioDeviceId: _audioDeviceId, ...streamInput } = input;
+      const updatedStream = await updateStream(stream.id, streamInput);
+      if (liveStream?.id !== stream.id) {
+        capture.stop();
+        return;
+      }
+      liveStream = updatedStream;
+      verifiedProfile = { actualWidth: capture.actualWidth, actualHeight: capture.actualHeight, actualFps: capture.actualFps };
+      captureSession = capture;
       const selectedAudio = audioCodecs.find((item) => item.supported && item.codec === "mp4a.40.2") || audioCodecs.find((item) => item.supported);
       startedPublisher = await startMoqPublisher({
-        publishUrl: stream.publishUrl,
-        fingerprintUrl: stream.fingerprintUrl || `${stream.publishUrl}/fingerprint`,
-        publishToken: stream.publishToken,
+        publishUrl: updatedStream.publishUrl!,
+        fingerprintUrl: updatedStream.fingerprintUrl || `${updatedStream.publishUrl}/fingerprint`,
+        publishToken: updatedStream.publishToken!,
         capture,
-        codec: finalCapability,
+        codec: validated.capability,
         input: streamInput,
         audioCodec: selectedAudio,
         onConnected: () => {
           if (liveStream?.id !== stream.id) return;
           publisherStatus = "live";
           publisherError = "";
+          liveStream = { ...liveStream, status: "live" };
         },
         onError: (message) => {
           if (liveStream?.id !== stream.id) return;
@@ -314,9 +362,18 @@
 
   function setPortraitMode(portraitMode: boolean) {
     if (!preparedInput || !liveStream || publishBusy || publisher || captureSession) return;
-    // ponytail: framing lives in the browser; persist draft edits only if resumable jobs are added.
     preparedInput = { ...preparedInput, portraitMode };
     liveStream = { ...liveStream, portraitMode };
+    verifiedProfile = null;
+    publisherStatus = "ready";
+    publisherError = "";
+  }
+
+  function setProfile(width: number, height: number, fps: number) {
+    if (!preparedInput || !liveStream || publishBusy || publisher || captureSession) return;
+    preparedInput = { ...preparedInput, width, height, fps };
+    liveStream = { ...liveStream, width, height, fps };
+    verifiedProfile = null;
     publisherStatus = "ready";
     publisherError = "";
   }
@@ -342,35 +399,47 @@
     }
   }
 
-  async function stopLive() {
+  function stopRelay() {
+    if (statsTimer !== null) window.clearInterval(statsTimer);
+    statsTimer = null;
+    stopAdaptive?.();
+    stopAdaptive = null;
+    publisher?.close();
+    publisher = null;
+    if (captureSession) {
+      verifiedProfile = { actualWidth: captureSession.actualWidth, actualHeight: captureSession.actualHeight, actualFps: captureSession.actualFps };
+      captureSession.stop();
+    }
+    captureSession = null;
+    if (liveStream) liveStream = { ...liveStream, status: "ready" };
+    liveStats = null;
+    publisherStatus = "ready";
+    publisherError = "";
+    targetBitrateKbps = preparedInput?.maxBitrateKbps || 0;
+    publishBusy = false;
+  }
+
+  async function closeJob() {
+    if (!liveStream || !window.confirm("Tutup job ini? URL OBS dan token akan dicabut permanen.")) return;
     const id = liveStream?.id;
-    cleanupLive(true);
+    cleanupLive();
     page = "dashboard";
     if (id) {
       try {
         await stopStream(id);
       } catch (error) {
-        dashboardError = errorMessage(error, "Stream lokal sudah dihentikan, tetapi path server belum terkonfirmasi.");
+        dashboardError = errorMessage(error, "Relay lokal berhenti, tetapi job server belum berhasil ditutup.");
       }
     }
     await refreshDashboard();
   }
 
-  function cleanupLive(closePublisher: boolean) {
-    if (statsTimer !== null) window.clearInterval(statsTimer);
-    statsTimer = null;
-    stopAdaptive?.();
-    stopAdaptive = null;
-    if (closePublisher) publisher?.close();
-    publisher = null;
-    captureSession?.stop();
-    captureSession = null;
+  function cleanupLive() {
+    stopRelay();
     liveStream = null;
     preparedInput = null;
     liveStats = null;
-    publisherStatus = "ready";
-    publisherError = "";
-    publishBusy = false;
+    verifiedProfile = null;
   }
 
   async function handleCopy() {
@@ -395,7 +464,7 @@
   }
 
   async function handleLogout() {
-    cleanupLive(true);
+    cleanupLive();
     try {
       await logout();
     } finally {
@@ -426,9 +495,9 @@
 {:else if page === "setup"}
   <SetupView codecs={codecs} audioCodecs={audioCodecs} devices={cameraDevices} {microphoneDevices} {microphonePermission} {microphoneChecking} {microphoneError} bind:selectedCodec detecting={detecting} creating={createBusy} error={setupError} onDetect={detectDevices} onCheckMicrophone={checkMicrophoneInput} onCreate={handleCreate} onBack={showDashboard} />
 {:else if page === "result" && liveStream}
-  <ResultView stream={liveStream} stats={liveStats} {publisherStatus} {targetBitrateKbps} onBack={() => (page = "live")} onStop={stopLive} />
+  <ResultView stream={liveStream} stats={liveStats} {publisherStatus} {targetBitrateKbps} onBack={() => (page = "live")} onStop={stopRelay} />
 {:else if page === "live" && liveStream}
-  <LiveView stream={liveStream} capture={captureSession} stats={liveStats} {publisherStatus} {publisherError} {targetBitrateKbps} {copied} starting={publishBusy} onStart={handlePublishStart} onPortraitMode={setPortraitMode} onCopy={handleCopy} onResult={openResult} onStop={stopLive} />
+  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} stats={liveStats} {publisherStatus} {publisherError} {targetBitrateKbps} {copied} starting={publishBusy} onStart={handlePublishStart} onProfile={setProfile} onPortraitMode={setPortraitMode} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onCloseJob={closeJob} />
 {:else}
-  <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
+  <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onOpenStream={handleOpenStream} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
 {/if}

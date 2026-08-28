@@ -49,7 +49,7 @@ Termasuk:
 - SRT output dengan token.
 - Halaman Result dengan player live, panduan OBS, SRT URL, dan HTML embed link.
 - Recording fMP4 di server.
-- Maksimal 8 stream aktif.
+- Maksimal 8 job terbuka.
 
 Tidak termasuk:
 
@@ -80,13 +80,15 @@ native. Browser tidak memiliki akses UDP/SRT mentah.
 3. Browser mengecek dukungan codec dan konfigurasi encoder.
 4. Operator memilih kamera, microphone, codec, resolusi, FPS, bitrate maksimum,
    mode portrait, dan recording.
-5. Tombol `Create stream` meminta backend membuat path MediaMTX dan token;
-   kamera belum dibuka pada tahap ini.
-6. Halaman kontrol menampilkan preview 16:9 kosong, framing, tombol Start/Stop,
+5. Tombol `Create stream` menguji konfigurasi encoder serta membuka kamera dan
+   microphone sementara untuk memverifikasi profile aktual.
+6. Hanya jika preflight lulus, frontend meminta backend membuat path, token,
+   SRT URL, dan job berstatus `ready`.
+7. Halaman kontrol menampilkan profile teruji, framing, tombol Start/Stop relay,
    dan SRT URL yang sudah dapat disalin.
-7. Tombol `Start camera & relay` menjalankan preflight profile, meminta kamera
-   dan microphone, lalu mulai mengirim encoded media ke MediaMTX.
-8. Halaman kontrol menampilkan status dan telemetry live.
+8. Tombol `Start camera & relay` memeriksa ulang profile lalu mulai mengirim
+   encoded media ke MediaMTX.
+9. Halaman kontrol menampilkan status dan telemetry live.
 
 Kegagalan capability atau preflight harus menghentikan proses dengan pesan
 yang menjelaskan penyebab dan tindakan perbaikan. Tidak boleh ada fallback
@@ -96,8 +98,8 @@ diam-diam ke resolusi, FPS, atau codec lain.
 
 Dashboard menampilkan:
 
-- Status: `connecting`, `live`, `degraded`, `reconnecting`, atau `failed`.
-- Codec, resolusi, dan FPS yang terkunci.
+- Status: `ready`, `connecting`, `live`, `reconnecting`, atau `failed`.
+- Codec, resolusi, dan FPS sesi saat ini.
 - Bitrate maksimum yang dipilih.
 - Target bitrate saat ini.
 - Bitrate yang diterima server.
@@ -110,13 +112,16 @@ Jika jaringan menurun, target bitrate boleh turun bertahap. Resolusi, FPS, dan
 codec tetap sama. Jika transport gagal, preview dan output OBS boleh freeze atau
 terputus, lalu UI menunjukkan reconnect/error.
 
-### 4.4 Menghentikan stream
+### 4.4 Stop relay dan menutup job
 
-1. Operator menekan `Stop`.
-2. Browser menutup encoder, publisher, kamera, dan microphone.
-3. Backend mencabut token.
-4. Backend menghapus path MediaMTX setelah recording segment terakhir selesai.
-5. SRT URL lama tidak lagi dapat digunakan.
+1. `Stop relay` menutup encoder, publisher, kamera, dan microphone lokal tetapi
+   mempertahankan path serta token server.
+2. Operator boleh mengganti resolusi/FPS ketika relay berhenti lalu Start lagi;
+   terjadi interupsi singkat, bukan pergantian seamless di tengah track.
+3. Job terbuka dapat dipakai kembali dari dashboard setelah refresh dan URL OBS
+   tetap sama.
+4. `Close job` mencabut token, menghapus path MediaMTX, dan membuat SRT URL lama
+   tidak dapat digunakan lagi.
 
 ## 5. Persyaratan fungsional
 
@@ -143,10 +148,11 @@ kamera, jaminan hardware encoder, atau jaminan performa. UI harus menyebut
 resolusi/FPS yang dipakai probe dan tidak boleh melabeli seluruh profile kamera
 sebagai tersedia.
 
-Saat operator menekan Start pada job yang sudah dibuat, browser harus memeriksa
-konfigurasi encoder pilihan, membuka kamera, lalu membaca resolusi dan FPS aktual
-dari metadata video/track. Nilai yang tidak dilaporkan atau lebih rendah dari
-profile pilihan harus ditolak; nilai request tidak boleh dipakai sebagai fallback.
+Create dan setiap Start harus memeriksa konfigurasi encoder pilihan, membuka
+kamera, lalu membaca resolusi dan FPS aktual dari metadata video/track. Nilai
+yang tidak dilaporkan atau lebih rendah dari profile pilihan harus ditolak;
+nilai request tidak boleh dipakai sebagai fallback. Kegagalan preflight Create
+tidak boleh mengirim `POST /api/streams`.
 
 VP8, VP9, dan AV1 dapat ditampilkan sebagai informasi capability, tetapi tidak
 dapat dipilih untuk profile SRT v1 karena output SRT MediaMTX difokuskan pada
@@ -196,7 +202,7 @@ bukan pasangan minimum/maksimum. [WebCodecs configuration](https://developer.moz
 Setiap stream memiliki SRT read URL dengan:
 
 - path unik;
-- token random;
+- token stabil per job yang diturunkan dari secret server;
 - latency `2000000` microseconds;
 - `pkt_size=1316`.
 
@@ -218,6 +224,8 @@ OBS menggunakan URL tersebut sebagai input MPEG-TS/SRT. [OBS SRT guide](https://
 - Part duration: 1 detik.
 - Retention default: 24 jam.
 - Recording aktif hanya untuk stream yang dipilih operator.
+- Nama segment memakai `%Y-%m-%d_%H-%M-%S-%f`, sehingga setiap sesi/reconnect
+  menghasilkan file bertimestamp dan tidak menimpa file sebelumnya.
 - Dashboard dapat menampilkan, men-download, dan menghapus recording.
 - Jika disk hampir penuh, recording dihentikan tanpa mematikan live relay.
 
@@ -226,7 +234,7 @@ stream ke fMP4 atau MPEG-TS tanpa kebutuhan transcoding. [MediaMTX recording](ht
 
 ### FR-08 — Capacity guard
 
-- Maksimal 8 stream aktif.
+- Maksimal 8 job terbuka (`ready` atau `live`).
 - Setiap stream maksimal satu SRT reader.
 - Request stream ke-9 ditolak dengan error yang jelas.
 - Kapasitas dapat dinaikkan setelah stress test, bukan otomatis saat runtime.
@@ -270,8 +278,8 @@ Pesan error harus menyebutkan penyebab dan tindakan:
 - Transport congestion: tampilkan target bitrate yang turun.
 - Transport putus: tampilkan reconnect tanpa mengubah resolusi/FPS.
 - Disk hampir penuh: hentikan recording dan pertahankan relay.
-- Token salah/kedaluwarsa: minta buat stream baru.
-- Limit stream tercapai: tampilkan jumlah stream aktif dan stop salah satu.
+- Token salah/kedaluwarsa: buka job yang valid atau buat job baru.
+- Limit stream tercapai: tampilkan jumlah job terbuka dan Close salah satu.
 
 ## 8. Acceptance criteria
 
@@ -280,9 +288,12 @@ Pesan error harus menyebutkan penyebab dan tindakan:
 - SQLite dan recording tetap ada setelah image/container di-rebuild karena
   `/data` di-bind mount ke folder host.
 - Pengguna anonim tidak dapat membuat stream atau membaca SRT.
-- `Create stream` menghasilkan job dan SRT URL sebelum kamera dibuka.
-- Kegagalan kamera pada Start tidak menghapus job; operator dapat memperbaiki
-  profile atau menghentikan job secara eksplisit.
+- `Create stream` menguji profile sebelum API membuat job; profile yang gagal
+  tidak meninggalkan job server.
+- Stop/Start relay serta perubahan resolusi/FPS mempertahankan path, token read,
+  dan SRT URL yang sama.
+- Job aktif dapat dibuka kembali dari dashboard setelah refresh/backend restart.
+- Hanya Close job yang mencabut token dan menonaktifkan SRT URL.
 - H.264/H.265 yang lolos preflight dapat live ke MediaMTX.
 - VP8/VP9/AV1 dapat dideteksi dan diberi status kompatibilitas yang benar.
 - Resolusi, FPS, dan codec tidak berubah ketika adaptive bitrate aktif.

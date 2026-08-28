@@ -35,7 +35,7 @@ func (a *App) checkDisk(ctx context.Context) {
 		return
 	}
 
-	rows, err := a.db.QueryContext(ctx, `SELECT id, path FROM streams WHERE status IN ('connecting', 'live') AND record = 1`)
+	rows, err := a.db.QueryContext(ctx, `SELECT id, path FROM streams WHERE status IN ('ready', 'connecting', 'live') AND record = 1`)
 	if err != nil {
 		log.Printf("disk guard query: %v", err)
 		return

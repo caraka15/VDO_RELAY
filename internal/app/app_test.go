@@ -50,18 +50,37 @@ func TestMediaPlayerURL(t *testing.T) {
 	}
 }
 
-func TestMediaOriginsAreExplicit(t *testing.T) {
+func TestMediaOriginsAllowBrowserAliases(t *testing.T) {
 	config := newMediaManager(Config{
 		PublicOrigin:     "https://app.example.com",
 		MoQPublicBaseURL: "https://media.example.com:8892",
 	}).configText()
-	if strings.Contains(config, `moqAllowOrigins: ["*"]`) {
-		t.Fatal("MoQ origins must not use a wildcard")
+	if !strings.Contains(config, `moqAllowOrigins: ["*"]`) {
+		t.Fatal("MoQ must accept browser aliases; media authentication still protects each path")
 	}
-	for _, expected := range []string{"https://app.example.com", "https://media.example.com:8892"} {
-		if !strings.Contains(config, expected) {
-			t.Fatalf("MediaMTX config missing explicit origin %q", expected)
-		}
+}
+
+func TestReusableStreamTokens(t *testing.T) {
+	dataDir := t.TempDir()
+	application, err := New(Config{DataDir: dataDir, MaxActiveStreams: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publish := application.streamToken("publish", "stream-1")
+	if publish != application.streamToken("publish", "stream-1") {
+		t.Fatal("stream token is not stable")
+	}
+	if publish == application.streamToken("read", "stream-1") || publish == application.streamToken("publish", "stream-2") {
+		t.Fatal("stream tokens are not scoped by purpose and stream")
+	}
+	application.Close()
+	restarted, err := New(Config{DataDir: dataDir, MaxActiveStreams: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if publish != restarted.streamToken("publish", "stream-1") {
+		t.Fatal("stream token changed after backend restart")
 	}
 }
 

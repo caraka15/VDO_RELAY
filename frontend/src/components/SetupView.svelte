@@ -86,7 +86,7 @@
     <div>
       <p class="mono mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">NEW STREAM / 01</p>
       <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Siapkan output</h1>
-      <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilih profile lalu buat job server. Kamera dan relay baru berjalan setelah Anda menekan Start di halaman kontrol.</p>
+      <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilih profile. Browser menguji kamera dan encoder lebih dulu; job server hanya dibuat jika profile lolos.</p>
     </div>
     <button class="button-quiet flex items-center gap-2" type="button" on:click={() => onBack()}>
       <span>Dashboard</span>
@@ -125,7 +125,7 @@
               {/each}
             {/if}
           </select>
-          <p class="mt-2 text-xs font-semibold text-[var(--faint)]">Tombol di atas hanya meminta izin dan membaca daftar device. Profile kamera aktual diverifikasi saat Start; tidak ada fallback diam-diam.</p>
+          <p class="mt-2 text-xs font-semibold text-[var(--faint)]">Tombol di atas meminta izin dan membaca daftar device. Profile pilihan diuji saat Create sebelum request job dikirim.</p>
         </div>
 
         <fieldset>
@@ -165,7 +165,7 @@
             </select>
           </div>
         </div>
-        <p class="text-xs font-semibold text-[var(--faint)]">Resolusi dan FPS ini adalah target output, bukan daftar profile yang diklaim tersedia oleh kamera.</p>
+        <p class="text-xs font-semibold text-[var(--faint)]">Browser tidak menyediakan daftar kombinasi resolusi/FPS yang pasti. Create menguji kombinasi yang dipilih secara langsung dan tidak membuat job jika gagal.</p>
       </div>
     </section>
 
@@ -249,7 +249,7 @@
 
           <label class="flex min-h-[52px] items-center gap-3 border border-[var(--border)] bg-[var(--surface-raised)] px-3">
             <input class="size-5 accent-[var(--accent)]" type="checkbox" bind:checked={record} />
-            <span class="flex items-center gap-2"><HardDrive size={17} /><span><span class="block text-sm font-bold">Record di server</span><span class="block text-xs text-[var(--muted)]">fMP4 · segment 10 menit · retensi 24 jam</span></span></span>
+            <span class="flex items-center gap-2"><HardDrive size={17} /><span><span class="block text-sm font-bold">Record di server</span><span class="block text-xs text-[var(--muted)]">fMP4 · timestamp per sesi · retensi 24 jam</span></span></span>
           </label>
         </div>
       </section>
@@ -264,7 +264,7 @@
     <button class="button-secondary" type="button" on:click={() => onBack()}>Batalkan</button>
     <button class="button-primary flex items-center justify-center gap-2 sm:min-w-[190px]" type="button" on:click={submit} disabled={creating || detecting || !selectedCapability?.supported || (audioEnabled && !audioReady)}>
       {#if creating}
-        <RefreshCw size={17} class="animate-spin" /><span>Membuat job...</span>
+        <RefreshCw size={17} class="animate-spin" /><span>Menguji &amp; membuat...</span>
       {:else}
         <Radio size={17} /><span>Create stream</span>
       {/if}

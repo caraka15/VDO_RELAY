@@ -1,12 +1,13 @@
 <script lang="ts">
   import { afterUpdate, onDestroy } from "svelte";
-  import { Activity, AlertCircle, Camera, Check, CircleStop, Copy, ExternalLink, HardDrive, Play, Radio, Smartphone, Video, Wifi } from "@lucide/svelte";
+  import { Activity, AlertCircle, Camera, Check, CircleStop, Copy, ExternalLink, HardDrive, Play, Radio, Smartphone, Trash2, Video, Wifi } from "@lucide/svelte";
   import type { Stream, StreamStats } from "../lib/api";
   import type { CaptureSession } from "../lib/media";
   import { formatBitrate } from "../lib/format";
 
   export let stream: Stream;
   export let capture: CaptureSession | null = null;
+  export let verifiedProfile: Pick<CaptureSession, "actualWidth" | "actualHeight" | "actualFps"> | null = null;
   export let stats: StreamStats | null = null;
   export let publisherStatus: "ready" | "connecting" | "live" | "error" = "ready";
   export let publisherError = "";
@@ -14,12 +15,29 @@
   export let copied = false;
   export let starting = false;
   export let onStart: () => void;
+  export let onProfile: (width: number, height: number, fps: number) => void;
   export let onPortraitMode: (portraitMode: boolean) => void;
   export let onCopy: () => void;
   export let onResult: () => void;
-  export let onStop: () => void;
+  export let onStopRelay: () => void;
+  export let onCloseJob: () => void;
 
   let previewHost: HTMLDivElement;
+  const resolutions = [
+    { width: 1920, height: 1080, label: "1920 × 1080" },
+    { width: 1280, height: 720, label: "1280 × 720" },
+    { width: 854, height: 480, label: "854 × 480" },
+  ];
+  const fpsOptions = [24, 30, 60];
+
+  function changeResolution(event: Event) {
+    const [width, height] = (event.currentTarget as HTMLSelectElement).value.split("x").map(Number);
+    onProfile(width, height, stream.fps);
+  }
+
+  function changeFPS(event: Event) {
+    onProfile(stream.width, stream.height, Number((event.currentTarget as HTMLSelectElement).value));
+  }
 
   afterUpdate(() => {
     if (capture?.canvas && previewHost && capture.canvas.parentElement !== previewHost) {
@@ -35,7 +53,7 @@
   $: statusColor = publisherStatus === "ready" ? "var(--accent)" : publisherStatus === "live" ? "var(--success)" : publisherStatus === "error" ? "var(--danger)" : "var(--warning)";
   $: pageTitle = publisherStatus === "ready" ? "Job stream siap" : publisherStatus === "live" ? "Output sedang berjalan" : publisherStatus === "error" ? "Start belum berhasil" : "Menyiapkan output";
   $: pageDescription = publisherStatus === "ready" || publisherStatus === "error"
-    ? "Link OBS sudah dibuat. Atur framing lalu mulai kamera dan relay."
+    ? "Job dan URL OBS tetap sama setiap kali relay dihentikan atau dimulai lagi."
     : "Preview di bawah adalah frame final yang dikirim ke server.";
 </script>
 
@@ -85,13 +103,27 @@
       </div>
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[var(--border)] px-4 py-3 text-xs font-semibold text-[var(--muted)]">
         <span class="inline-flex items-center gap-2"><span class="status-dot" style={`color:${capture ? "var(--success)" : "var(--faint)"}`}></span>{capture ? "Canvas final aktif" : "Preview standby"}</span>
-        <span>{capture ? `Input aktual ${capture.actualWidth}×${capture.actualHeight} / ${Math.round(capture.actualFps * 10) / 10} FPS` : "Profile kamera belum diuji"}</span>
+        <span>{capture ? `Input aktual ${capture.actualWidth}×${capture.actualHeight} / ${Math.round(capture.actualFps * 10) / 10} FPS` : verifiedProfile ? `Profile teruji ${verifiedProfile.actualWidth}×${verifiedProfile.actualHeight} / ${Math.round(verifiedProfile.actualFps * 10) / 10} FPS` : "Profile kamera belum diuji"}</span>
         <span>{stream.portraitMode ? "Portrait + bar hitam" : "Landscape fill"}</span>
         <span>{stream.audioEnabled ? "Audio aktif" : "Audio off"}</span>
       </div>
       <div class="border-t border-[var(--border)] p-4 sm:p-5">
         <fieldset disabled={Boolean(capture) || starting} aria-describedby="framing-help">
-          <legend class="mb-2 text-sm font-extrabold">Framing output</legend>
+          <legend class="mb-2 text-sm font-extrabold">Profile dan framing output</legend>
+          <div class="mb-3 grid gap-3 min-[420px]:grid-cols-2">
+            <div>
+              <label for="live-resolution" class="mb-2 block text-sm font-bold">Resolusi</label>
+              <select id="live-resolution" class="field w-full px-3" value={`${stream.width}x${stream.height}`} on:change={changeResolution}>
+                {#each resolutions as option}<option value={`${option.width}x${option.height}`}>{option.label}</option>{/each}
+              </select>
+            </div>
+            <div>
+              <label for="live-fps" class="mb-2 block text-sm font-bold">Frame rate</label>
+              <select id="live-fps" class="field w-full px-3" value={stream.fps} on:change={changeFPS}>
+                {#each fpsOptions as option}<option value={option}>{option} FPS</option>{/each}
+              </select>
+            </div>
+          </div>
           <div class="grid gap-2 min-[420px]:grid-cols-2">
             <button class="flex min-h-[52px] items-center gap-3 border px-3 text-left" class:border-[var(--accent)]={!stream.portraitMode} class:bg-[var(--surface-strong)]={!stream.portraitMode} class:border-[var(--border)]={stream.portraitMode} type="button" aria-pressed={!stream.portraitMode} on:click={() => onPortraitMode(false)}>
               <Video size={18} class="shrink-0" /><span><strong class="block">Landscape</strong><span class="block text-xs text-[var(--muted)]">Isi frame 16:9</span></span>
@@ -100,10 +132,10 @@
               <Smartphone size={18} class="shrink-0" /><span><strong class="block">Portrait</strong><span class="block text-xs text-[var(--muted)]">Bar hitam kiri-kanan</span></span>
             </button>
           </div>
-          <p id="framing-help" class="mt-2 text-xs font-semibold text-[var(--faint)]">Framing dikunci setelah kamera dimulai.</p>
+          <p id="framing-help" class="mt-2 text-xs font-semibold text-[var(--faint)]">Saat relay aktif, tekan Stop relay sebelum mengganti profile. Start berikutnya menguji profile baru tanpa mengubah URL OBS.</p>
         </fieldset>
 
-        <div class="mt-4 flex flex-col gap-2 sm:flex-row">
+        <div class="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
           <button class="button-primary flex flex-1 items-center justify-center gap-2" type="button" on:click={onStart} disabled={starting || Boolean(capture)}>
             {#if starting}
               <Activity size={18} class="animate-pulse" /><span>Membuka kamera...</span>
@@ -113,8 +145,11 @@
               <Play size={18} /><span>Start camera &amp; relay</span>
             {/if}
           </button>
-          <button class="button-danger flex items-center justify-center gap-2" type="button" on:click={onStop}>
-            <CircleStop size={18} /><span>Stop job</span>
+          <button class="button-secondary flex items-center justify-center gap-2" type="button" on:click={onStopRelay} disabled={!capture || starting}>
+            <CircleStop size={18} /><span>Stop relay</span>
+          </button>
+          <button class="button-danger flex items-center justify-center gap-2" type="button" on:click={onCloseJob} disabled={starting}>
+            <Trash2 size={18} /><span>Close job</span>
           </button>
         </div>
       </div>
@@ -144,7 +179,7 @@
         <button class="button-secondary mt-3 flex w-full items-center justify-center gap-2" type="button" on:click={onCopy} disabled={!stream.srtUrl}>
           {#if copied}<Check size={17} class="text-[var(--success)]" /><span>Tersalin</span>{:else}<Copy size={17} /><span>Copy SRT URL</span>{/if}
         </button>
-        <p class="mt-3 text-xs font-semibold text-[var(--faint)]">Token dicabut saat Stop. Jangan bagikan screenshot URL ini.</p>
+        <p class="mt-3 text-xs font-semibold text-[var(--faint)]">URL tetap sama saat Stop relay/Start ulang. Token hanya dicabut saat Close job.</p>
       </section>
     </aside>
   </div>

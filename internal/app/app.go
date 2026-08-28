@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -91,6 +93,7 @@ type App struct {
 	publicHandler   http.Handler
 	internalHandler http.Handler
 	secureCookies   bool
+	tokenKey        []byte
 
 	streamMu      sync.Mutex // ponytail: one global stream lock; per-path locks only if creation latency matters.
 	statsMu       sync.Mutex
@@ -112,6 +115,10 @@ func New(cfg Config) (*App, error) {
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "recordings"), 0o750); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
+	tokenKey, err := loadOrCreateTokenKey(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
 
 	db, err := openDatabase(filepath.Join(cfg.DataDir, "app.db"))
 	if err != nil {
@@ -121,11 +128,6 @@ func New(cfg Config) (*App, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(`UPDATE streams SET status = 'stopped', stopped_at = ?, publish_token_hash = '', read_token_hash = '' WHERE status IN ('connecting', 'live')`, time.Now().UTC().Unix()); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("reset stale streams: %w", err)
-	}
-
 	secureCookies := false
 	_, certErr := os.Stat(cfg.TLSCertFile)
 	_, keyErr := os.Stat(cfg.TLSKeyFile)
@@ -138,6 +140,7 @@ func New(cfg Config) (*App, error) {
 		db:            db,
 		media:         newMediaManager(cfg),
 		secureCookies: secureCookies,
+		tokenKey:      tokenKey,
 		stats:         make(map[string]statsSample),
 		loginAttempts: make(map[string]loginAttempt),
 	}
@@ -156,8 +159,14 @@ func (a *App) Close() {
 }
 
 func (a *App) StartMedia(ctx context.Context) error {
+	if err := a.media.Start(ctx); err != nil {
+		return err
+	}
+	if err := a.restoreStreamPaths(ctx); err != nil {
+		return err
+	}
 	a.startDiskMonitor(ctx)
-	return a.media.Start(ctx)
+	return nil
 }
 
 func (a *App) ServeInternal(ctx context.Context) {
@@ -203,6 +212,76 @@ func randomToken(bytes int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func loadOrCreateTokenKey(dataDir string) ([]byte, error) {
+	path := filepath.Join(dataDir, "token.key")
+	key, err := os.ReadFile(path)
+	if err == nil {
+		if len(key) != 32 {
+			return nil, fmt.Errorf("token key %q has invalid length", path)
+		}
+		return key, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read token key: %w", err)
+	}
+	key = make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("create token key: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("create token key: %w", err)
+	}
+	if _, err := file.Write(key); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("write token key: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("sync token key: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("close token key: %w", err)
+	}
+	return key, nil
+}
+
+func (a *App) streamToken(purpose, id string) string {
+	mac := hmac.New(sha256.New, a.tokenKey)
+	_, _ = mac.Write([]byte(purpose + ":" + id))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func openStreamStatus(status string) bool {
+	return status == "ready" || status == "connecting" || status == "live"
+}
+
+func (a *App) restoreStreamPaths(ctx context.Context) error {
+	streams, err := listStreams(ctx, a.db)
+	if err != nil {
+		return fmt.Errorf("load reusable streams: %w", err)
+	}
+	for _, stream := range streams {
+		if !openStreamStatus(stream.Status) {
+			continue
+		}
+		publishToken := a.streamToken("publish", stream.ID)
+		readToken := a.streamToken("read", stream.ID)
+		if !tokenMatches(stream.PublishTokenHash, publishToken) || !tokenMatches(stream.ReadTokenHash, readToken) {
+			// Streams from versions before reusable tokens cannot be recovered safely.
+			_, _ = a.db.ExecContext(ctx, `UPDATE streams SET status = 'stopped', stopped_at = ?, publish_token_hash = '', read_token_hash = '' WHERE id = ?`, time.Now().UTC().Unix(), stream.ID)
+			continue
+		}
+		if err := a.media.addPath(ctx, stream.Path, stream.Record); err != nil {
+			return fmt.Errorf("restore media path %s: %w", stream.Path, err)
+		}
+		if _, err := a.db.ExecContext(ctx, `UPDATE streams SET status = 'ready', stopped_at = NULL, error = '' WHERE id = ?`, stream.ID); err != nil {
+			return fmt.Errorf("restore stream %s: %w", stream.ID, err)
+		}
+	}
+	return nil
 }
 
 func hostOnly(hostport string) string {
