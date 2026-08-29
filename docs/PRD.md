@@ -46,8 +46,9 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
    torch bila dilaporkan browser.
 4. Sistem menguji kombinasi resolusi/FPS output dengan constraint `ideal` pada
    kamera yang dipilih, termasuk aspect ratio target dan `crop-and-scale`.
-5. Kombinasi ditampilkan bila track live dan rasio aktual mendekati target;
-   ukuran/FPS aktual dapat mengikuti keputusan browser.
+5. Kombinasi ditampilkan bila track live, ukurannya minimal memenuhi target, dan
+   rasio aktual mendekati target. FPS boleh sedikit lebih tinggi dari target
+   selama tidak melewati batas max.
 6. Operator memilih codec WebRTC yang tersedia, audio Opus, max bitrate, dan
    optional recording.
 7. `Create stream` membuat job/path/token saja; kamera belum dimulai.
@@ -83,15 +84,17 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 ### Video
 
-- Resolusi dan FPS adalah target encoded track, bukan ukuran sensor; browser
-  dapat mengembalikan ukuran/FPS aktual yang sedikit berbeda.
+- Resolusi dan FPS adalah target encoded track, bukan ukuran sensor; probe hanya
+  menerima track dengan ukuran minimal target dan FPS tidak di bawah target.
 - Probe hanya menawarkan target 1920×1080, 1280×720, dan 854×480 pada FPS
   24/30/60 (serta FPS maksimum/default yang dilaporkan), atau pasangan portrait
   9:16 ketika orientasi portrait dipilih.
 - Setiap target diuji dengan `width`, `height`, dan `aspectRatio` `ideal`, serta
-  `frameRate` `ideal` dengan batas `max` dan `resizeMode: crop-and-scale`
-  `ideal`. Target diterima bila track live dan rasio `getSettings()` mendekati
-  target; ukuran/FPS aktual tidak dibandingkan dengan equality kaku.
+  `frameRate` `ideal` dengan batas `max`. Width/height tidak diberi batas `max`
+  karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
+  batas atas. Browser mencoba crop-and-scale sebagai preferensi, lalu mode wajib
+  bila perlu, dan terakhir mode native; mode terakhir hanya diterima bila hasil
+  live tetap memenuhi ukuran target dan rasio.
 - Kemampuan sensor native, misalnya 2304×1728, hanya ditampilkan sebagai
   informasi kamera. Kamera 4:3 dapat dipotong ke 1920×1080 jika browser
   menyetujui pipeline crop-and-scale; ukuran 4:3 tidak menjadi output job.

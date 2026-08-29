@@ -121,12 +121,16 @@ OBS melalui SRT dan player browser melalui WHEP.
 ## Kamera, codec, dan orientasi
 
 Resolusi/FPS yang dipilih adalah target track yang dikirim; ukuran/FPS aktual
-ditentukan browser sesuai kemampuan kamera.
+diverifikasi setelah browser membuka kamera.
 Detector menguji preset target 1920×1080, 1280×720, dan 854×480 (atau pasangan
 portrait-nya) dengan `width`, `height`, dan `aspectRatio` `ideal`, serta
-`frameRate` `ideal` dengan batas `max` dan `resizeMode: crop-and-scale` `ideal`.
-Target dianggap valid bila track aktif dan rasio aktual mendekati target; ukuran
-sensor 2304×1728 (4:3) tidak otomatis menjadi output final.
+`frameRate` `ideal` dengan batas `max`. Width/height tidak diberi batas `max`
+karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
+batas atas.
+Browser mencoba crop-and-scale sebagai preferensi, lalu mode wajib bila perlu,
+dan hanya menerima hasil live yang memenuhi ukuran minimum serta rasio target.
+Percobaan native terakhir hanya diterima jika kamera memang menyediakan mode
+16:9/9:16; 4:3 tidak pernah diterima sebagai fallback.
 
 Semantik `resizeMode` mengikuti [MediaTrackConstraints di MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints).
 

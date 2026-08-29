@@ -69,11 +69,15 @@ src/lib/mediamtx-webrtc-reader.js
 ### Capture semantics
 
 Output `getUserMedia` memakai `width`, `height`, dan `aspectRatio` `ideal`, serta
-`frameRate` `ideal` dengan batas `max` dan `resizeMode: crop-and-scale` `ideal`.
+`frameRate` `ideal` dengan batas `max`. Width/height tidak memiliki batas `max`
+karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
+batas atas. Browser dicoba
+dengan crop-and-scale sebagai preferensi, lalu sebagai mode wajib bila perlu,
+dan terakhir tanpa resize mode untuk kamera yang memiliki mode native 16:9.
 Detector menguji target output 16:9/9:16 yang ditentukan aplikasi dan menerima
-hasil selama track aktif serta rasio `getSettings()` mendekati target. Kemampuan
-sensor native seperti 2304×1728 hanya dipakai sebagai informasi dan filter;
-tidak pernah otomatis menjadi ukuran output job.
+hasil hanya selama track aktif, ukurannya tidak di bawah target, dan rasio
+`getSettings()` mendekati target. Kemampuan sensor native seperti 2304×1728
+hanya dipakai sebagai informasi dan filter; 4:3 tidak pernah menjadi fallback.
 
 Saat startup, migrasi SQLite mengubah profile job lama yang bukan 16:9/9:16 ke
 1920×1080 atau 1080×1920 berdasarkan `portrait_mode`. Path, token, dan recording

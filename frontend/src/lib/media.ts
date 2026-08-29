@@ -8,6 +8,7 @@ export type VideoCapability = {
   srtCompatible: boolean;
   hardware: boolean;
   powerEfficient: boolean;
+  reason?: string;
 };
 
 export type AudioCapability = {
@@ -157,22 +158,99 @@ export async function probeCameraDevices(): Promise<CameraDevice[]> {
   return result;
 }
 
-function idealCameraConstraints(profile: CameraProfile, deviceId?: string): MediaTrackConstraints {
-  return {
+type ResizeModeAttempt = "ideal" | "required" | "native";
+
+function idealCameraConstraints(profile: CameraProfile, deviceId?: string, resizeMode: ResizeModeAttempt = "ideal"): MediaTrackConstraints {
+  const constraints = {
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-    facingMode: { ideal: "environment" },
+    ...(!deviceId ? { facingMode: { ideal: "environment" } } : {}),
+    // Do not add width/height max constraints here. Android camera HALs can
+    // reject the crop-and-scale path when both dimensions have an upper cap.
+    // The actual track dimensions and ratio are validated after opening.
     width: { ideal: profile.width },
     height: { ideal: profile.height },
     aspectRatio: { ideal: profile.width / profile.height },
     frameRate: { ideal: profile.fps, max: profile.fps },
-    resizeMode: { ideal: "crop-and-scale" },
-  } as MediaTrackConstraints;
+  } as MediaTrackConstraints & { resizeMode?: string | { ideal: string } };
+  if (resizeMode === "ideal") constraints.resizeMode = { ideal: "crop-and-scale" };
+  if (resizeMode === "required") constraints.resizeMode = "crop-and-scale";
+  return constraints as MediaTrackConstraints;
+}
+
+async function applyIdealCameraProfile(track: MediaStreamTrack, profile: CameraProfile, resizeMode: ResizeModeAttempt = "ideal"): Promise<void> {
+  const constraints = idealCameraConstraints(profile, undefined, resizeMode) as MediaTrackConstraints & { facingMode?: unknown };
+  delete constraints.facingMode;
+  await track.applyConstraints(constraints);
+}
+
+function isRatioClose(actualRatio: number, targetRatio: number): boolean {
+  if (actualRatio <= 0 || targetRatio <= 0) return false;
+  return Math.abs(actualRatio - targetRatio) / targetRatio <= 0.03;
 }
 
 function isAspectRatioClose(width: number, height: number, targetRatio: number): boolean {
-  if (width <= 0 || height <= 0 || targetRatio <= 0) return false;
-  const actualRatio = width / height;
-  return Math.abs(actualRatio - targetRatio) / targetRatio <= 0.03;
+  return isRatioClose(width > 0 && height > 0 ? width / height : 0, targetRatio);
+}
+
+function settingsAspectRatio(settings: MediaTrackSettings | undefined): number {
+  const width = finiteNumber(settings?.width) || 0;
+  const height = finiteNumber(settings?.height) || 0;
+  if (width > 0 && height > 0) return width / height;
+  return finiteNumber(settings?.aspectRatio) || 0;
+}
+
+function profileMatches(track: MediaStreamTrack | undefined, settings: MediaTrackSettings | undefined, profile: CameraProfile): boolean {
+  const width = finiteNumber(settings?.width) || 0;
+  const height = finiteNumber(settings?.height) || 0;
+  const fps = finiteNumber(settings?.frameRate) || 0;
+  const ratioMatches = width > 0 && height > 0
+    ? isAspectRatioClose(width, height, profile.width / profile.height)
+    : isRatioClose(settingsAspectRatio(settings), profile.width / profile.height);
+  return Boolean(
+    track?.readyState === "live"
+      && width >= profile.width
+      && height >= profile.height
+      && ratioMatches
+      && fps + 1 >= profile.fps,
+  );
+}
+
+function canRetryCameraProfile(error: unknown): boolean {
+  const name = error && typeof error === "object" && "name" in error ? String(error.name) : "";
+  return name === "OverconstrainedError" || name === "TypeError";
+}
+
+async function requestCameraProfile(
+  profile: CameraProfile,
+  deviceId: string | undefined,
+  audio: MediaTrackConstraints | false,
+): Promise<{ stream: MediaStream; track: MediaStreamTrack; settings: MediaTrackSettings }> {
+  let lastError: unknown = null;
+  for (const resizeMode of ["ideal", "required", "native"] as const) {
+    let stream: MediaStream | null = null;
+    let accepted = false;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: idealCameraConstraints(profile, deviceId, resizeMode),
+        audio,
+      });
+      const track = stream.getVideoTracks()[0];
+      if (!track) throw new Error("Kamera tidak menghasilkan track video.");
+      await applyIdealCameraProfile(track, profile, resizeMode);
+      const settings = track.getSettings();
+      if (profileMatches(track, settings, profile)) {
+        accepted = true;
+        return { stream, track, settings };
+      }
+      lastError = new Error("Kamera tidak menghasilkan target output yang diminta.");
+    } catch (error) {
+      lastError = error;
+      if (!canRetryCameraProfile(error)) throw error;
+    } finally {
+      if (!accepted) stream?.getTracks().forEach((track) => track.stop());
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Kamera tidak menghasilkan target output yang diminta.");
 }
 
 export function cameraResolutionLabel(width: number, height: number): string {
@@ -203,20 +281,31 @@ export async function probeCameraProfiles(deviceId: string | undefined, portrait
     if (!supported.some((item) => item.width === profile.width && item.height === profile.height && item.fps === profile.fps)) supported.push(profile);
   };
 
-  for (const profile of candidates) {
-    let stream: MediaStream | null = null;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: idealCameraConstraints(profile, deviceId), audio: false });
-      const track = stream.getVideoTracks()[0];
-      const settings = track?.getSettings();
-      const actualWidth = finiteNumber(settings?.width) || 0;
-      const actualHeight = finiteNumber(settings?.height) || 0;
-      if (track?.readyState === "live" && isAspectRatioClose(actualWidth, actualHeight, profile.width / profile.height)) addSupported(profile);
-    } catch {
-      // Ideal constraints may still fail when the selected device is unavailable.
-    } finally {
-      stream?.getTracks().forEach((track) => track.stop());
+  let stream: MediaStream | null = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), facingMode: { ideal: "environment" } },
+      audio: false,
+    });
+    const track = stream.getVideoTracks()[0];
+    if (!track) return supported;
+    for (const profile of candidates) {
+      for (const resizeMode of ["ideal", "required", "native"] as const) {
+        try {
+          await applyIdealCameraProfile(track, profile, resizeMode);
+          if (profileMatches(track, track.getSettings(), profile)) {
+            addSupported(profile);
+            break;
+          }
+        } catch (error) {
+          if (!canRetryCameraProfile(error)) break;
+        }
+      }
     }
+  } catch {
+    // Permission and device errors are surfaced by the initial device probe.
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
   }
 
   return supported;
@@ -227,53 +316,99 @@ function finiteNumber(value: unknown): number | null {
 }
 
 const videoCandidates = [
-  { key: "h264", label: "H.264", mime: "video/H264", srtCompatible: true, contentTypes: ["video/H264;profile-level-id=42e01f;packetization-mode=1", "video/H264"] },
-  { key: "h265", label: "H.265", mime: "video/H265", srtCompatible: true, contentTypes: ["video/H265;profile-id=1;tier-flag=0;level-id=93", "video/H265"] },
-  { key: "av1", label: "AV1", mime: "video/AV1", srtCompatible: false, contentTypes: [] },
-  { key: "vp9", label: "VP9", mime: "video/VP9", srtCompatible: false, contentTypes: [] },
-  { key: "vp8", label: "VP8", mime: "video/VP8", srtCompatible: false, contentTypes: [] },
+  { key: "h264", label: "H.264", mime: "video/H264", mimes: ["video/H264"], srtCompatible: true, contentTypes: ["video/H264", "video/H264;profile-level-id=42e01f;packetization-mode=1"] },
+  // Chrome's WebRTC name is H265, while some builds expose HEVC spelling.
+  { key: "h265", label: "H.265", mime: "video/H265", mimes: ["video/H265", "video/HEVC", "video/hevc"], srtCompatible: true, contentTypes: ["video/H265", "video/H265;profile-id=1;tier-flag=0;level-id=93", "video/HEVC", "video/hevc"] },
+  { key: "av1", label: "AV1", mime: "video/AV1", mimes: ["video/AV1"], srtCompatible: false, contentTypes: [] },
+  { key: "vp9", label: "VP9", mime: "video/VP9", mimes: ["video/VP9"], srtCompatible: false, contentTypes: [] },
+  { key: "vp8", label: "VP8", mime: "video/VP8", mimes: ["video/VP8"], srtCompatible: false, contentTypes: [] },
 ] as const;
 
-async function isHardwareCodec(candidate: (typeof videoCandidates)[number], capabilities: any[]): Promise<boolean> {
-  if (!candidate.srtCompatible) return false;
-  if (!capabilities.some((codec) => String(codec.mimeType).toLowerCase() === candidate.mime.toLowerCase())) return false;
+type CodecProbe = { hardware: boolean; codec: string; reason: string };
 
-  const mediaCapabilities = (navigator as any).mediaCapabilities;
-  if (typeof mediaCapabilities?.encodingInfo !== "function") return false;
+function codecMime(codec: any): string {
+  return String(codec?.mimeType || "").split(";", 1)[0].trim();
+}
 
-  const bitrate = candidate.key === "h264" ? 7_000_000 : 4_000_000;
-  for (const contentType of candidate.contentTypes) {
-    try {
-      const result = await mediaCapabilities.encodingInfo({
-        type: "webrtc",
-        video: {
-          contentType,
-          width: 1920,
-          height: 1080,
-          bitrate,
-          framerate: 30,
-        },
-      });
-      if (result?.supported === true && result?.powerEfficient === true) return true;
-    } catch {
-      // Try the next MIME spelling; browsers differ in accepted WebRTC codec strings.
+function codecContentTypes(candidate: (typeof videoCandidates)[number], codec: any): string[] {
+  const contentTypes = new Set<string>(candidate.contentTypes);
+  const mime = codecMime(codec);
+  if (mime) {
+    contentTypes.add(mime);
+    contentTypes.add(mime.toLowerCase());
+    if (codec?.sdpFmtpLine) {
+      // WebRTC's advertised fmtp string is the most reliable profile and
+      // level description. MediaCapabilities examples use a space after ';'.
+      contentTypes.add(`${mime}; ${String(codec.sdpFmtpLine)}`);
+      contentTypes.add(`${mime.toLowerCase()}; ${String(codec.sdpFmtpLine)}`);
     }
   }
-  return false;
+  return [...contentTypes];
+}
+
+async function probeHardwareCodec(candidate: (typeof videoCandidates)[number], capabilities: any[], decoderCapabilities: any[]): Promise<CodecProbe> {
+  if (!candidate.srtCompatible) return { hardware: false, codec: candidate.mime, reason: "codec ini belum dipakai untuk output SRT" };
+  const matches = (codec: any) => candidate.mimes.some((mime) => codecMime(codec).toLowerCase() === mime.toLowerCase());
+  const matchedCodecs = capabilities.filter(matches);
+  if (matchedCodecs.length === 0) {
+    const decoderMatches = decoderCapabilities.filter(matches);
+    return {
+      hardware: false,
+      codec: candidate.mime,
+      reason: decoderMatches.length > 0
+        ? "browser mengekspos codec ini untuk decode, tetapi belum untuk encoder WebRTC"
+        : "browser WebRTC tidak mengekspos encoder codec ini",
+    };
+  }
+
+  const mediaCapabilities = (navigator as any).mediaCapabilities;
+  if (typeof mediaCapabilities?.encodingInfo !== "function") return { hardware: false, codec: String(matchedCodecs[0].mimeType), reason: "MediaCapabilities encodingInfo tidak tersedia" };
+
+  const bitrate = candidate.key === "h264" ? 7_000_000 : 4_000_000;
+  let supported = false;
+  for (const matchedCodec of matchedCodecs) {
+    for (const contentType of codecContentTypes(candidate, matchedCodec)) {
+      try {
+        const result = await mediaCapabilities.encodingInfo({
+          type: "webrtc",
+          video: {
+            contentType,
+            width: 1920,
+            height: 1080,
+            bitrate,
+            framerate: 30,
+          },
+        });
+        if (result?.supported === true) supported = true;
+        if (result?.supported === true && result?.powerEfficient === true) {
+          return { hardware: true, codec: String(matchedCodec.mimeType), reason: "" };
+        }
+      } catch {
+        // Browser versions differ in accepted MIME parameter spellings.
+      }
+    }
+  }
+  return {
+    hardware: false,
+    codec: String(matchedCodecs[0].mimeType),
+    reason: supported ? "browser mendukung codec, tetapi tidak menandainya efisien daya" : "MediaCapabilities menolak konfigurasi encoder WebRTC",
+  };
 }
 
 export async function probeVideoCodecs(): Promise<VideoCapability[]> {
   const capabilities = (globalThis as any).RTCRtpSender?.getCapabilities?.("video")?.codecs || [];
+  const decoderCapabilities = (globalThis as any).RTCRtpReceiver?.getCapabilities?.("video")?.codecs || [];
   return Promise.all(videoCandidates.map(async (candidate) => {
-    const hardware = await isHardwareCodec(candidate, capabilities);
+    const probe = await probeHardwareCodec(candidate, capabilities, decoderCapabilities);
     return {
       key: candidate.key,
       label: candidate.label,
-      codec: candidate.mime,
+      codec: probe.codec,
       srtCompatible: candidate.srtCompatible,
-      supported: candidate.srtCompatible && hardware,
-      hardware,
-      powerEfficient: hardware,
+      supported: candidate.srtCompatible && probe.hardware,
+      hardware: probe.hardware,
+      powerEfficient: probe.hardware,
+      reason: probe.reason,
     };
   }));
 }
@@ -301,7 +436,6 @@ export async function openCapture(
   input: Pick<StartStreamInput, "width" | "height" | "fps" | "audioEnabled"> & { deviceId?: string; audioDeviceId?: string },
 ): Promise<CaptureSession> {
   assertBrowserMediaSupport(input.audioEnabled);
-  const videoConstraints = idealCameraConstraints({ width: input.width, height: input.height, fps: input.fps }, input.deviceId);
   const audioConstraints: MediaTrackConstraints = {
     echoCancellation: true,
     noiseSuppression: true,
@@ -309,28 +443,28 @@ export async function openCapture(
   };
   if (input.audioDeviceId) audioConstraints.deviceId = { exact: input.audioDeviceId };
 
-  let sourceStream: MediaStream | null = null;
+  let sourceStream: MediaStream;
+  let sourceTrack: MediaStreamTrack;
+  let settings: MediaTrackSettings;
   try {
-    sourceStream = await navigator.mediaDevices.getUserMedia({
-      video: videoConstraints,
-      audio: input.audioEnabled ? audioConstraints : false,
-    });
+    const result = await requestCameraProfile(
+      { width: input.width, height: input.height, fps: input.fps },
+      input.deviceId,
+      input.audioEnabled ? audioConstraints : false,
+    );
+    sourceStream = result.stream;
+    sourceTrack = result.track;
+    settings = result.settings;
   } catch (error) {
     throw mediaAccessError(error, input.audioEnabled ? "camera-microphone" : "camera");
   }
 
-  const sourceTrack = sourceStream?.getVideoTracks()[0];
-  if (!sourceStream || !sourceTrack || sourceTrack.readyState !== "live") {
-    sourceStream?.getTracks().forEach((track) => track.stop());
-    throw new Error("Kamera tidak menghasilkan track aktif.");
-  }
-  const settings = sourceTrack.getSettings();
   const actualFps = finiteNumber(settings.frameRate) || 0;
   const actualWidth = finiteNumber(settings.width) || 0;
   const actualHeight = finiteNumber(settings.height) || 0;
-  if (!isAspectRatioClose(actualWidth, actualHeight, input.width / input.height)) {
+  if (!profileMatches(sourceTrack, settings, { width: input.width, height: input.height, fps: input.fps })) {
     sourceStream.getTracks().forEach((track) => track.stop());
-    throw new Error(`Kamera aktif menghasilkan ${actualWidth || "?"} × ${actualHeight || "?"}; rasio tidak mendekati ${input.width}:${input.height}. Pilih kamera atau orientasi lain.`);
+    throw new Error(`Kamera aktif menghasilkan ${actualWidth || "?"} × ${actualHeight || "?"} pada ${Math.round(actualFps * 10) / 10 || "?"} FPS; target ${input.width} × ${input.height} / ${input.fps} FPS belum terbukti.`);
   }
 
   const audioTracks = input.audioEnabled ? sourceStream.getAudioTracks() : [];

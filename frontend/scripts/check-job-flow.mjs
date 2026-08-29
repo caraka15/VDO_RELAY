@@ -20,6 +20,7 @@ assert.match(create, /await createStream\(/, "Create must allocate the server jo
 assert.ok(create.indexOf("await probeVideoCodecs(") < create.indexOf("await createStream("), "Codec validation must happen before the server job is created");
 assert.doesNotMatch(create, /await handlePublishStart\(\)/, "Creating a job must not open the camera automatically");
 assert.match(setup, /probeCameraProfiles\(/, "Setup must probe camera modes");
+assert.doesNotMatch(setup, /[\u00c2\u00c3\u00e2\ufffd]/u, "Setup copy must not contain mojibake characters");
 assert.match(setup, /profileSupported/, "Create must stay disabled until the selected camera mode passes");
 assert.match(setup, /outputSupported !== true/, "Create must stay disabled until the selected WebRTC codec passes");
 assert.match(publish, /await openValidatedCapture\(/, "Every relay start must revalidate the selected profile");
@@ -37,7 +38,8 @@ assert.match(media, /device\.maxWidth/, "Camera probe must test dimensions repor
 assert.match(media, /width: \{ ideal: profile\.width \}/, "Camera width must use an ideal target");
 assert.match(media, /height: \{ ideal: profile\.height \}/, "Camera height must use an ideal target");
 assert.match(media, /aspectRatio: \{ ideal: profile\.width \/ profile\.height \}/, "Camera aspect ratio must use an ideal target");
-assert.match(media, /resizeMode: \{ ideal: "crop-and-scale" \}/, "Camera output must request browser crop-and-scale when available");
+assert.match(media, /resizeMode = "crop-and-scale"/, "Camera output must force browser crop-and-scale");
+assert.match(media, /applyIdealCameraProfile/, "Camera output must apply the target profile after opening the track");
 assert.doesNotMatch(`${source}\n${live}\n${media}`, /screen\.orientation\.lock/, "Camera crop test must not depend on screen orientation lock");
 assert.match(media, /readyState === "live"/, "Camera verification must require a live track");
 assert.match(media, /isAspectRatioClose/, "Camera verification must allow browser crop-and-scale output");
@@ -50,6 +52,9 @@ assert.doesNotMatch(media, /document\.createElement\("canvas"\)/, "The camera pa
 assert.match(media, /RTCRtpSender/, "Codec detection must use the browser WebRTC capability list");
 assert.match(media, /encodingInfo/, "Codec detection must query MediaCapabilities encodingInfo");
 assert.match(media, /powerEfficient/, "Codec detection must require a power-efficient encoder");
+assert.match(media, /video\/HEVC/, "HEVC detection must accept the browser HEVC MIME spelling");
+assert.match(media, /sdpFmtpLine/, "Codec detection must try the browser's advertised H265 parameters");
+assert.doesNotMatch(media, /tx-mode=SRST/, "H265 capability probing must not add an unsupported fmtp parameter");
 assert.match(media, /maxWidth/, "Camera capability details must include maximum dimensions");
 assert.doesNotMatch(media, /VideoEncoder|AudioEncoder|MediaStreamTrackProcessor|WebTransport/, "The browser path must not implement a second media protocol");
 assert.match(live, /preview-video/, "Live preview must expose the real camera source");
@@ -58,6 +63,7 @@ assert.match(live, /preview-stage/, "Live view must have a dedicated preview sta
 assert.match(result, /stats\?\.status === "live"/, "Result player must wait for an actual live media path");
 assert.doesNotMatch(result, /stats\?\.mediaAvailable/, "A configured but idle MediaMTX path must not start the player");
 assert.match(player, /mediamtx-webrtc-reader/, "Public player must use the WHEP reader");
+assert.match(player, /loadeddata/, "Public player must wait for a decoded video frame");
 assert.match(styles, /body:has\(\.live-page\)/, "Mobile live view must disable page scrolling");
 assert.match(styles, /object-fit: cover/, "Mobile source preview must fill its portrait stage");
 assert.match(styles, /100cqh/, "Mobile landscape source preview must scale from the full stage");

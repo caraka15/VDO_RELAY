@@ -25,14 +25,20 @@ type apiError struct {
 
 func (a *App) withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connectSource := "'self' https:"
+		if requestScheme(r) == "http" {
+			// Local HTTP testing can use a separate HTTP media port. HTTPS
+			// deployments remain restricted to secure media endpoints.
+			connectSource = "'self' http: https:"
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
 		if r.URL.Path == "/player" {
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors *; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' https:; frame-src 'self' https:; connect-src 'self' https:")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors *; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' https:; frame-src 'self' https:; connect-src "+connectSource)
 		} else {
 			w.Header().Set("X-Frame-Options", "DENY")
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' https:; frame-src 'self' https:; connect-src 'self' https:")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' https:; frame-src 'self' https:; connect-src "+connectSource)
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/healthz" {
 			w.Header().Set("Cache-Control", "no-store")
