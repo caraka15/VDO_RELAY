@@ -38,6 +38,7 @@ assert.match(media, /width: \{ ideal: profile\.width \}/, "Camera width must use
 assert.match(media, /height: \{ ideal: profile\.height \}/, "Camera height must use an ideal target");
 assert.match(media, /aspectRatio: \{ ideal: profile\.width \/ profile\.height \}/, "Camera aspect ratio must use an ideal target");
 assert.match(media, /resizeMode: \{ ideal: "crop-and-scale" \}/, "Camera output must request browser crop-and-scale when available");
+assert.doesNotMatch(`${source}\n${live}\n${media}`, /screen\.orientation\.lock/, "Camera crop test must not depend on screen orientation lock");
 assert.match(media, /readyState === "live"/, "Camera verification must require a live track");
 assert.match(media, /isAspectRatioClose/, "Camera verification must allow browser crop-and-scale output");
 assert.doesNotMatch(media, /exactCameraConstraints|cropCameraConstraints/, "Camera mode selection must not retain exact profile helpers");
