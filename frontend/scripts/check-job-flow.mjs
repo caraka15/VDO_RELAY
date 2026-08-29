@@ -7,6 +7,7 @@ const live = readFileSync(new URL("../src/components/LiveView.svelte", import.me
 const dashboard = readFileSync(new URL("../src/components/DashboardView.svelte", import.meta.url), "utf8");
 const result = readFileSync(new URL("../src/components/ResultView.svelte", import.meta.url), "utf8");
 const player = readFileSync(new URL("../src/components/PlayerView.svelte", import.meta.url), "utf8");
+const deviceCheck = readFileSync(new URL("../src/components/DeviceCheckView.svelte", import.meta.url), "utf8");
 const api = readFileSync(new URL("../src/lib/api.ts", import.meta.url), "utf8");
 const media = readFileSync(new URL("../src/lib/media.ts", import.meta.url), "utf8");
 const publisher = readFileSync(new URL("../src/lib/mediamtx-webrtc-publisher.js", import.meta.url), "utf8");
@@ -32,6 +33,9 @@ assert.match(source, /async function stopRelay\(\)/, "Stopping relay must update
 assert.match(source, /async function leaveLive\(\)/, "Leaving live view must return to the dashboard without deleting the job");
 assert.match(api, /export const deleteStream/, "The API must expose explicit stream deletion");
 assert.match(dashboard, /onDeleteStream/, "The dashboard must expose explicit stream deletion");
+assert.match(dashboard, /onDeviceCheck/, "The dashboard must expose the device diagnostics page");
+assert.match(source, /page === "device-check"/, "The app must render the device diagnostics page");
+assert.match(source, /window\.location\.pathname === "\/device-check"/, "The device diagnostics page must be deep-linkable");
 assert.match(dashboard, /on:click=\{\(\) => onOpenStream\(stream\)\}/, "Stopped jobs must remain reopenable");
 assert.match(source, /trackWidth = stream\.portraitMode/, "Legacy portrait jobs must normalize to the portrait track layout");
 assert.match(live, /onLeaveHome/, "Live view must provide a reusable Home action");
@@ -61,6 +65,13 @@ assert.match(media, /video\/HEVC/, "HEVC detection must accept the browser HEVC 
 assert.match(media, /sdpFmtpLine/, "Codec detection must try the browser's advertised H265 parameters");
 assert.match(media, /tx-mode=SRST/, "H265 capability probing must include the WebRTC H265 fmtp parameters");
 assert.match(media, /maxWidth/, "Camera capability details must include maximum dimensions");
+assert.match(media, /runDeviceCheck/, "Device diagnostics must be runnable from the browser");
+assert.match(media, /DEVICE_CHECK_RESOLUTIONS/, "Device diagnostics must probe multiple output sizes");
+assert.match(media, /DEVICE_CHECK_RATIOS/, "Device diagnostics must probe multiple aspect ratios");
+assert.match(deviceCheck, /EncodingInfo probe/, "Device diagnostics must show codec encoding probes");
+assert.match(deviceCheck, /Range capability/, "Device diagnostics must show camera capability ranges");
+assert.match(deviceCheck, /Uji rasio tanpa menentukan resolusi/, "Device diagnostics must separate ratio-only probes");
+assert.match(deviceCheck, /Audio input terdaftar/, "Device diagnostics must show microphone inputs");
 assert.doesNotMatch(media, /VideoEncoder|AudioEncoder|MediaStreamTrackProcessor|WebTransport/, "The browser path must not implement a second media protocol");
 assert.match(live, /preview-video/, "Live preview must expose the real camera source");
 assert.match(live, /live-links-panel/, "Live view must expose SRT and player links without navigation");

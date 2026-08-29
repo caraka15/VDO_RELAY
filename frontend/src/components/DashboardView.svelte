@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, ArrowRight, KeyRound, LogOut, Plus, RefreshCw, Server, ShieldCheck, Trash2, Wifi } from "@lucide/svelte";
+  import { Activity, ArrowRight, KeyRound, LogOut, Plus, RefreshCw, ScanLine, Server, ShieldCheck, Trash2, Wifi } from "@lucide/svelte";
   import type { Recording, Session, Stream } from "../lib/api";
   import RecordingsList from "./RecordingsList.svelte";
 
@@ -10,6 +10,7 @@
   export let refreshing = false;
   export let error = "";
   export let onNewStream: () => void;
+  export let onDeviceCheck: () => void;
   export let onOpenStream: (stream: Stream) => void;
   export let onDeleteStream: (stream: Stream) => void;
   export let onRefresh: () => void;
@@ -46,8 +47,9 @@
         <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Stream dashboard</h1>
         <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Satu tempat untuk menyiapkan kamera, memantau relay, dan mengelola file hasil record.</p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         <button class="button-secondary inline-flex items-center gap-2" type="button" on:click={onRefresh} disabled={refreshing}><RefreshCw size={17} class={refreshing ? "animate-spin" : ""} /><span>Refresh</span></button>
+        <button class="button-secondary inline-flex items-center gap-2" type="button" on:click={onDeviceCheck}><ScanLine size={17} /><span>Device check</span></button>
         <button class="button-primary inline-flex items-center gap-2" type="button" on:click={onNewStream}><Plus size={18} /><span>New stream</span></button>
       </div>
     </section>

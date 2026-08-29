@@ -43,13 +43,16 @@
   import PlayerView from "./components/PlayerView.svelte";
   import ResultView from "./components/ResultView.svelte";
   import SetupView from "./components/SetupView.svelte";
+  import DeviceCheckView from "./components/DeviceCheckView.svelte";
 
-  type Page = "login" | "password" | "dashboard" | "setup" | "live" | "result" | "player";
+  type Page = "login" | "password" | "dashboard" | "device-check" | "setup" | "live" | "result" | "player";
+  type AuthLandingPage = "dashboard" | "device-check";
   type PreparedStreamInput = StartStreamInput & { deviceId?: string; audioDeviceId?: string };
   type PublisherStatus = "ready" | "connecting" | "live" | "error";
   type VerifiedProfile = Pick<CaptureSession, "actualWidth" | "actualHeight" | "actualFps">;
 
   let page: Page = "login";
+  let authLandingPage: AuthLandingPage = "dashboard";
   let session: Session | null = null;
   let booting = true;
   let loginBusy = false;
@@ -97,6 +100,7 @@
       booting = false;
       return;
     }
+    authLandingPage = window.location.pathname === "/device-check" ? "device-check" : "dashboard";
     try {
       const current = await getSession();
       if (!current.authenticated) {
@@ -104,7 +108,7 @@
         return;
       }
       session = current;
-      page = current.mustChangePassword ? "password" : "dashboard";
+      page = current.mustChangePassword ? "password" : authLandingPage;
       if (!current.mustChangePassword) {
         void Promise.all([refreshDashboard(), loadCapabilities()]).catch((error) => {
           dashboardError = errorMessage(error, "Data awal belum bisa dimuat.");
@@ -122,7 +126,7 @@
     loginError = "";
     try {
       session = await login(username, password);
-      page = session.mustChangePassword ? "password" : "dashboard";
+      page = session.mustChangePassword ? "password" : authLandingPage;
       if (!session.mustChangePassword) await Promise.all([refreshDashboard(), loadCapabilities()]);
     } catch (error) {
       loginError = errorMessage(error, "Username atau password salah.");
@@ -137,7 +141,7 @@
     try {
       await changePassword(currentPassword, newPassword);
       if (session) session = { ...session, mustChangePassword: false };
-      page = "dashboard";
+      page = authLandingPage;
       await Promise.all([refreshDashboard(), loadCapabilities()]);
     } catch (error) {
       passwordError = errorMessage(error, "Password belum bisa disimpan.");
@@ -205,7 +209,15 @@
   function showDashboard() {
     setupError = "";
     page = "dashboard";
+    authLandingPage = "dashboard";
+    if (window.location.pathname === "/device-check") window.history.pushState({}, "", "/");
     void refreshDashboard();
+  }
+
+  function openDeviceCheck() {
+    page = "device-check";
+    authLandingPage = "device-check";
+    if (window.location.pathname !== "/device-check") window.history.pushState({}, "", "/device-check");
   }
 
   async function refreshDashboard() {
@@ -515,10 +527,12 @@
   <PasswordView busy={passwordBusy} error={passwordError} onSubmit={handlePasswordChange} />
 {:else if page === "setup"}
   <SetupView codecs={codecs} audioCodecs={audioCodecs} devices={cameraDevices} {microphoneDevices} {microphonePermission} {microphoneChecking} {microphoneError} bind:selectedCodec detecting={detecting} creating={createBusy} error={setupError} onDetect={detectDevices} onCheckMicrophone={checkMicrophoneInput} onCreate={handleCreate} onBack={showDashboard} />
+{:else if page === "device-check"}
+  <DeviceCheckView session={session} onBack={showDashboard} onPassword={() => (page = "password")} onLogout={handleLogout} />
 {:else if page === "result" && liveStream}
   <ResultView stream={liveStream} stats={liveStats} {publisherStatus} onBack={() => (page = "live")} onStop={stopRelay} />
 {:else if page === "live" && liveStream}
   <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} {cameraDevices} {microphoneDevices} deviceId={preparedInput?.deviceId || ""} audioDeviceId={preparedInput?.audioDeviceId || ""} stats={liveStats} {publisherStatus} {publisherError} {copied} starting={publishBusy} onStart={handlePublishStart} onSource={setSource} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onLeaveHome={leaveLive} />
 {:else}
-  <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onOpenStream={handleOpenStream} onDeleteStream={handleDeleteStream} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
+  <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onDeviceCheck={openDeviceCheck} onOpenStream={handleOpenStream} onDeleteStream={handleDeleteStream} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
 {/if}

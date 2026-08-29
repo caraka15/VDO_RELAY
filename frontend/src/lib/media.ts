@@ -18,6 +18,134 @@ export type AudioCapability = {
   supported: boolean;
 };
 
+export type NumericRange = {
+  min: number | null;
+  max: number | null;
+  step: number | null;
+};
+
+export type TrackSnapshot = {
+  width: number;
+  height: number;
+  aspectRatio: number;
+  frameRate: number;
+  resizeMode: string;
+  facingMode: string;
+};
+
+export type CameraCapabilitySnapshot = {
+  width: NumericRange | null;
+  height: NumericRange | null;
+  aspectRatio: NumericRange | null;
+  frameRate: NumericRange | null;
+  resizeMode: string[];
+  facingMode: string[];
+  zoom: NumericRange | null;
+  torch: boolean | null;
+  focusMode: string[];
+  exposureMode: string[];
+  whiteBalanceMode: string[];
+};
+
+export type CameraRatioCheck = {
+  label: string;
+  targetRatio: number;
+  actual: TrackSnapshot | null;
+  status: "matched" | "fallback" | "failed";
+  error?: string;
+};
+
+export type CameraResolutionCheck = {
+  label: string;
+  targetWidth: number;
+  targetHeight: number;
+  actual: TrackSnapshot | null;
+  status: "exact" | "higher" | "fallback" | "failed";
+  error?: string;
+};
+
+export type CameraDiagnostic = {
+  deviceId: string;
+  label: string;
+  capabilities: CameraCapabilitySnapshot | null;
+  initial: TrackSnapshot | null;
+  ratioChecks: CameraRatioCheck[];
+  resolutionChecks: CameraResolutionCheck[];
+  error?: string;
+};
+
+export type AudioCapabilitySnapshot = {
+  sampleRate: NumericRange | null;
+  sampleSize: NumericRange | null;
+  channelCount: NumericRange | null;
+  latency: NumericRange | null;
+  echoCancellation: string[];
+  noiseSuppression: string[];
+  autoGainControl: string[];
+};
+
+export type AudioTrackSnapshot = {
+  sampleRate: number;
+  sampleSize: number;
+  channelCount: number;
+  latency: number;
+  echoCancellation: boolean | null;
+  noiseSuppression: boolean | null;
+  autoGainControl: boolean | null;
+};
+
+export type AudioDiagnostic = {
+  devices: { deviceId: string; groupId: string; label: string }[];
+  active: AudioTrackSnapshot | null;
+  capabilities: AudioCapabilitySnapshot | null;
+  senderCodecs: string[];
+  receiverCodecs: string[];
+  opusSupported: boolean;
+  permission: string;
+  error?: string;
+};
+
+export type CodecEncodingCheck = {
+  width: number;
+  height: number;
+  supported: boolean;
+  powerEfficient: boolean | null;
+  contentType: string;
+};
+
+export type VideoCodecDiagnostic = {
+  key: string;
+  label: string;
+  codec: string;
+  srtCompatible: boolean;
+  encoderAdvertised: boolean;
+  decoderAdvertised: boolean;
+  senderCodecs: string[];
+  receiverCodecs: string[];
+  mediaCapabilitiesAvailable: boolean;
+  supported: boolean;
+  hardware: boolean;
+  powerEfficient: boolean | null;
+  checks: CodecEncodingCheck[];
+  reason: string;
+};
+
+export type BrowserDiagnostic = {
+  secureContext: boolean;
+  userAgent: string;
+  api: Record<string, boolean>;
+  permissions: { camera: string; microphone: string };
+  supportedConstraints: Record<string, boolean>;
+};
+
+export type DeviceCheckReport = {
+  checkedAt: string;
+  browser: BrowserDiagnostic;
+  cameras: CameraDiagnostic[];
+  audio: AudioDiagnostic;
+  codecs: VideoCodecDiagnostic[];
+};
+
 export type CameraDevice = {
   deviceId: string;
   label: string;
@@ -45,6 +173,20 @@ export const CAMERA_RESOLUTIONS = [
 ] as const;
 
 export const CAMERA_FPS_OPTIONS = [24, 30, 60] as const;
+
+export const DEVICE_CHECK_RESOLUTIONS = [
+  { label: "4K UHD", width: 3840, height: 2160 },
+  { label: "1440p", width: 2560, height: 1440 },
+  { label: "1080p", width: 1920, height: 1080 },
+  { label: "720p", width: 1280, height: 720 },
+  { label: "480p", width: 854, height: 480 },
+] as const;
+
+export const DEVICE_CHECK_RATIOS = [
+  { label: "16:9", ratio: 16 / 9 },
+  { label: "9:16", ratio: 9 / 16 },
+  { label: "4:3", ratio: 4 / 3 },
+] as const;
 
 export type CaptureSession = {
   sourceStream: MediaStream;
@@ -326,8 +468,6 @@ const videoCandidates = [
   { key: "vp8", label: "VP8", mime: "video/VP8", mimes: ["video/VP8"], srtCompatible: false, contentTypes: [] },
 ] as const;
 
-type CodecProbe = { hardware: boolean; codec: string; reason: string };
-
 function codecMime(codec: any): string {
   return String(codec?.mimeType || "").split(";", 1)[0].trim();
 }
@@ -345,73 +485,134 @@ function codecContentTypes(candidate: (typeof videoCandidates)[number], codec: a
       contentTypes.add(`${mime.toLowerCase()}; ${String(codec.sdpFmtpLine)}`);
     }
   }
+  if (contentTypes.size === 0) contentTypes.add(candidate.mime);
   return [...contentTypes];
 }
 
-async function probeHardwareCodec(candidate: (typeof videoCandidates)[number], capabilities: any[], decoderCapabilities: any[]): Promise<CodecProbe> {
-  if (!candidate.srtCompatible) return { hardware: false, codec: candidate.mime, reason: "codec ini belum dipakai untuk output SRT" };
+const CODEC_CHECK_SIZES = [
+  { width: 1280, height: 720 },
+  { width: 1920, height: 1080 },
+] as const;
+
+function codecDescription(codec: any): string {
+  const mime = codecMime(codec);
+  const fmtp = String(codec?.sdpFmtpLine || "").trim();
+  return fmtp ? `${mime}; ${fmtp}` : mime;
+}
+
+async function inspectVideoCodec(
+  candidate: (typeof videoCandidates)[number],
+  capabilities: any[],
+  decoderCapabilities: any[],
+): Promise<VideoCodecDiagnostic> {
   const matches = (codec: any) => candidate.mimes.some((mime) => codecMime(codec).toLowerCase() === mime.toLowerCase());
   const matchedCodecs = capabilities.filter(matches);
-  if (matchedCodecs.length === 0) {
-    const decoderMatches = decoderCapabilities.filter(matches);
-    return {
-      hardware: false,
-      codec: candidate.mime,
-      reason: decoderMatches.length > 0
-        ? "browser mengekspos codec ini untuk decode, tetapi belum untuk encoder WebRTC"
-        : "browser WebRTC tidak mengekspos encoder codec ini",
-    };
-  }
-
+  const decoderMatches = decoderCapabilities.filter(matches);
+  const senderCodecs = matchedCodecs.map(codecDescription).filter(Boolean);
+  const receiverCodecs = decoderMatches.map(codecDescription).filter(Boolean);
   const mediaCapabilities = (navigator as any).mediaCapabilities;
-  if (typeof mediaCapabilities?.encodingInfo !== "function") return { hardware: false, codec: String(matchedCodecs[0].mimeType), reason: "MediaCapabilities encodingInfo tidak tersedia" };
+  const mediaCapabilitiesAvailable = typeof mediaCapabilities?.encodingInfo === "function";
+  const checks: CodecEncodingCheck[] = [];
 
-  const bitrate = candidate.key === "h264" ? 7_000_000 : 4_000_000;
-  let supported = false;
-  for (const matchedCodec of matchedCodecs) {
-    for (const contentType of codecContentTypes(candidate, matchedCodec)) {
-      try {
-        const result = await mediaCapabilities.encodingInfo({
-          type: "webrtc",
-          video: {
-            contentType,
-            width: 1920,
-            height: 1080,
-            bitrate,
-            framerate: 30,
-          },
-        });
-        if (result?.supported === true) supported = true;
-        if (result?.supported === true && result?.powerEfficient === true) {
-          return { hardware: true, codec: String(matchedCodec.mimeType), reason: "" };
+  if (matchedCodecs.length > 0 && mediaCapabilitiesAvailable) {
+    const bitrate = candidate.key === "h264" ? 7_000_000 : candidate.key === "h265" ? 4_000_000 : 2_000_000;
+    for (const size of CODEC_CHECK_SIZES) {
+      let best: CodecEncodingCheck | null = null;
+      for (const matchedCodec of matchedCodecs) {
+        for (const contentType of codecContentTypes(candidate, matchedCodec)) {
+          try {
+            const result = await mediaCapabilities.encodingInfo({
+              type: "webrtc",
+              video: {
+                contentType,
+                width: size.width,
+                height: size.height,
+                bitrate,
+                framerate: 30,
+              },
+            });
+            const check: CodecEncodingCheck = {
+              width: size.width,
+              height: size.height,
+              supported: result?.supported === true,
+              powerEfficient: typeof result?.powerEfficient === "boolean" ? result.powerEfficient : null,
+              contentType,
+            };
+            if (!best || (check.supported && !best.supported) || (check.powerEfficient === true && best.powerEfficient !== true)) best = check;
+            if (check.supported && check.powerEfficient === true) break;
+          } catch {
+            // Browser builds differ in accepted MIME parameter spellings.
+          }
         }
-      } catch {
-        // Browser versions differ in accepted MIME parameter spellings.
+        if (best?.supported && best.powerEfficient === true) break;
       }
+      checks.push(best || {
+        width: size.width,
+        height: size.height,
+        supported: false,
+        powerEfficient: null,
+        contentType: "",
+      });
     }
   }
+
+  const supported = checks.some((check) => check.supported);
+  const powerEfficient = checks.some((check) => check.powerEfficient === true)
+    ? true
+    : checks.some((check) => check.powerEfficient === false)
+      ? false
+      : null;
+  const hardware = powerEfficient === true;
+  let reason = "";
+  if (matchedCodecs.length === 0) {
+    reason = decoderMatches.length > 0
+      ? "browser mengekspos codec ini untuk decode, tetapi belum untuk encoder WebRTC"
+      : "browser WebRTC tidak mengekspos encoder codec ini";
+  } else if (!mediaCapabilitiesAvailable) {
+    reason = "MediaCapabilities encodingInfo tidak tersedia";
+  } else if (!supported) {
+    reason = "MediaCapabilities menolak konfigurasi encoder WebRTC yang diuji";
+  } else if (!hardware) {
+    reason = "browser mendukung codec, tetapi belum menandainya efisien daya";
+  } else if (!candidate.srtCompatible) {
+    reason = "encoder hardware terdeteksi, tetapi codec ini belum dipakai untuk output SRT";
+  }
+
   return {
-    hardware: false,
-    codec: String(matchedCodecs[0].mimeType),
-    reason: supported ? "browser mendukung codec, tetapi tidak menandainya efisien daya" : "MediaCapabilities menolak konfigurasi encoder WebRTC",
+    key: candidate.key,
+    label: candidate.label,
+    codec: String(matchedCodecs[0]?.mimeType || candidate.mime),
+    srtCompatible: candidate.srtCompatible,
+    encoderAdvertised: matchedCodecs.length > 0,
+    decoderAdvertised: decoderMatches.length > 0,
+    senderCodecs,
+    receiverCodecs,
+    mediaCapabilitiesAvailable,
+    supported,
+    hardware,
+    powerEfficient,
+    checks,
+    reason,
   };
 }
 
-export async function probeVideoCodecs(): Promise<VideoCapability[]> {
+export async function probeVideoCodecDiagnostics(): Promise<VideoCodecDiagnostic[]> {
   const capabilities = (globalThis as any).RTCRtpSender?.getCapabilities?.("video")?.codecs || [];
   const decoderCapabilities = (globalThis as any).RTCRtpReceiver?.getCapabilities?.("video")?.codecs || [];
-  return Promise.all(videoCandidates.map(async (candidate) => {
-    const probe = await probeHardwareCodec(candidate, capabilities, decoderCapabilities);
-    return {
-      key: candidate.key,
-      label: candidate.label,
-      codec: probe.codec,
-      srtCompatible: candidate.srtCompatible,
-      supported: candidate.srtCompatible && probe.hardware,
-      hardware: probe.hardware,
-      powerEfficient: probe.hardware,
-      reason: probe.reason,
-    };
+  return Promise.all(videoCandidates.map((candidate) => inspectVideoCodec(candidate, capabilities, decoderCapabilities)));
+}
+
+export async function probeVideoCodecs(): Promise<VideoCapability[]> {
+  const diagnostics = await probeVideoCodecDiagnostics();
+  return diagnostics.map((diagnostic) => ({
+    key: diagnostic.key,
+    label: diagnostic.label,
+    codec: diagnostic.codec,
+    srtCompatible: diagnostic.srtCompatible,
+    supported: diagnostic.srtCompatible && diagnostic.hardware,
+    hardware: diagnostic.hardware,
+    powerEfficient: diagnostic.powerEfficient === true,
+    reason: diagnostic.reason,
   }));
 }
 
@@ -419,6 +620,305 @@ export async function probeAudioCodecs(): Promise<AudioCapability[]> {
   const capabilities = (globalThis as any).RTCRtpSender?.getCapabilities?.("audio")?.codecs || [];
   const opusSupported = capabilities.some((codec: { mimeType?: string }) => String(codec.mimeType).toLowerCase() === "audio/opus");
   return [{ key: "opus" as const, label: "Opus", codec: "opus", supported: opusSupported }];
+}
+
+function nullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function numberRange(value: any): NumericRange | null {
+  if (!value || typeof value !== "object") return null;
+  const range = {
+    min: nullableNumber(value.min),
+    max: nullableNumber(value.max),
+    step: nullableNumber(value.step),
+  };
+  return range.min === null && range.max === null && range.step === null ? null : range;
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  return typeof value === "string" && value ? [value] : [];
+}
+
+function snapshotTrack(settings: MediaTrackSettings | undefined): TrackSnapshot {
+  const raw = settings as (MediaTrackSettings & { resizeMode?: string }) | undefined;
+  const width = finiteNumber(settings?.width) || 0;
+  const height = finiteNumber(settings?.height) || 0;
+  return {
+    width,
+    height,
+    aspectRatio: width > 0 && height > 0 ? width / height : finiteNumber(settings?.aspectRatio) || 0,
+    frameRate: finiteNumber(settings?.frameRate) || 0,
+    resizeMode: String(raw?.resizeMode || ""),
+    facingMode: String(settings?.facingMode || ""),
+  };
+}
+
+function snapshotCameraCapabilities(capabilities: any): CameraCapabilitySnapshot {
+  return {
+    width: numberRange(capabilities?.width),
+    height: numberRange(capabilities?.height),
+    aspectRatio: numberRange(capabilities?.aspectRatio),
+    frameRate: numberRange(capabilities?.frameRate),
+    resizeMode: stringList(capabilities?.resizeMode),
+    facingMode: stringList(capabilities?.facingMode),
+    zoom: numberRange(capabilities?.zoom),
+    torch: typeof capabilities?.torch === "boolean" ? capabilities.torch : null,
+    focusMode: stringList(capabilities?.focusMode),
+    exposureMode: stringList(capabilities?.exposureMode),
+    whiteBalanceMode: stringList(capabilities?.whiteBalanceMode),
+  };
+}
+
+function snapshotAudioCapabilities(capabilities: any): AudioCapabilitySnapshot {
+  return {
+    sampleRate: numberRange(capabilities?.sampleRate),
+    sampleSize: numberRange(capabilities?.sampleSize),
+    channelCount: numberRange(capabilities?.channelCount),
+    latency: numberRange(capabilities?.latency),
+    echoCancellation: stringList(capabilities?.echoCancellation),
+    noiseSuppression: stringList(capabilities?.noiseSuppression),
+    autoGainControl: stringList(capabilities?.autoGainControl),
+  };
+}
+
+function snapshotAudioTrack(settings: MediaTrackSettings | undefined): AudioTrackSnapshot {
+  const raw = settings as (MediaTrackSettings & { latency?: number }) | undefined;
+  return {
+    sampleRate: finiteNumber(settings?.sampleRate) || 0,
+    sampleSize: finiteNumber(settings?.sampleSize) || 0,
+    channelCount: finiteNumber(settings?.channelCount) || 0,
+    latency: finiteNumber(raw?.latency) || 0,
+    echoCancellation: typeof settings?.echoCancellation === "boolean" ? settings.echoCancellation : null,
+    noiseSuppression: typeof settings?.noiseSuppression === "boolean" ? settings.noiseSuppression : null,
+    autoGainControl: typeof settings?.autoGainControl === "boolean" ? settings.autoGainControl : null,
+  };
+}
+
+function cameraVideoConstraints(deviceId: string, extra: MediaTrackConstraints = {}): MediaTrackConstraints {
+  return {
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    ...extra,
+  };
+}
+
+async function openDiagnosticCamera(deviceId: string, extra: MediaTrackConstraints = {}): Promise<{ stream: MediaStream; track: MediaStreamTrack }> {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: cameraVideoConstraints(deviceId, extra),
+    audio: false,
+  });
+  const track = stream.getVideoTracks()[0];
+  if (!track) {
+    stream.getTracks().forEach((item) => item.stop());
+    throw new Error("Kamera tidak menghasilkan track video.");
+  }
+  return { stream, track };
+}
+
+function ratioCheckStatus(actual: TrackSnapshot, targetRatio: number): "matched" | "fallback" {
+  return actual.width > 0 && actual.height > 0 && isAspectRatioClose(actual.width, actual.height, targetRatio) ? "matched" : "fallback";
+}
+
+function resolutionCheckStatus(actual: TrackSnapshot, width: number, height: number): "exact" | "higher" | "fallback" {
+  if (actual.width === width && actual.height === height && isAspectRatioClose(actual.width, actual.height, width / height)) return "exact";
+  if (actual.width >= width && actual.height >= height && isAspectRatioClose(actual.width, actual.height, width / height)) return "higher";
+  return "fallback";
+}
+
+async function checkCameraRatio(deviceId: string, label: string, targetRatio: number): Promise<CameraRatioCheck> {
+  let stream: MediaStream | null = null;
+  try {
+    const opened = await openDiagnosticCamera(deviceId, {
+      aspectRatio: { ideal: targetRatio },
+      resizeMode: { ideal: "crop-and-scale" } as any,
+    } as any);
+    stream = opened.stream;
+    const actual = snapshotTrack(opened.track.getSettings());
+    return { label, targetRatio, actual, status: ratioCheckStatus(actual, targetRatio) };
+  } catch (error) {
+    return { label, targetRatio, actual: null, status: "failed", error: error instanceof Error ? error.message : "Probe rasio gagal." };
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+  }
+}
+
+async function checkCameraResolution(deviceId: string, target: { label: string; width: number; height: number }): Promise<CameraResolutionCheck> {
+  let stream: MediaStream | null = null;
+  try {
+    const opened = await openDiagnosticCamera(deviceId, {
+      width: { ideal: target.width },
+      height: { ideal: target.height },
+      aspectRatio: { ideal: target.width / target.height },
+      resizeMode: { ideal: "crop-and-scale" } as any,
+    } as any);
+    stream = opened.stream;
+    const actual = snapshotTrack(opened.track.getSettings());
+    return { ...target, targetWidth: target.width, targetHeight: target.height, actual, status: resolutionCheckStatus(actual, target.width, target.height) };
+  } catch (error) {
+    return { ...target, targetWidth: target.width, targetHeight: target.height, actual: null, status: "failed", error: error instanceof Error ? error.message : "Probe resolusi gagal." };
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+  }
+}
+
+async function inspectCamera(device: MediaDeviceInfo): Promise<CameraDiagnostic> {
+  let stream: MediaStream | null = null;
+  try {
+    const opened = await openDiagnosticCamera(device.deviceId);
+    stream = opened.stream;
+    const capabilities = snapshotCameraCapabilities(opened.track.getCapabilities?.() || {});
+    const initial = snapshotTrack(opened.track.getSettings());
+    return {
+      deviceId: device.deviceId,
+      label: device.label || "Kamera tanpa nama",
+      capabilities,
+      initial,
+      ratioChecks: [],
+      resolutionChecks: [],
+    };
+  } catch (error) {
+    return {
+      deviceId: device.deviceId,
+      label: device.label || "Kamera tanpa nama",
+      capabilities: null,
+      initial: null,
+      ratioChecks: [],
+      resolutionChecks: [],
+      error: error instanceof Error ? error.message : "Kamera tidak bisa dibuka.",
+    };
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+  }
+}
+
+async function inspectCameraWithProbes(device: MediaDeviceInfo): Promise<CameraDiagnostic> {
+  const diagnostic = await inspectCamera(device);
+  if (diagnostic.error) return diagnostic;
+  diagnostic.ratioChecks = [];
+  for (const target of DEVICE_CHECK_RATIOS) diagnostic.ratioChecks.push(await checkCameraRatio(device.deviceId, target.label, target.ratio));
+  diagnostic.resolutionChecks = [];
+  for (const target of DEVICE_CHECK_RESOLUTIONS) diagnostic.resolutionChecks.push(await checkCameraResolution(device.deviceId, target));
+  return diagnostic;
+}
+
+async function permissionState(name: "camera" | "microphone"): Promise<string> {
+  try {
+    const permissions = (navigator as any).permissions;
+    if (typeof permissions?.query !== "function") return "unknown";
+    return String((await permissions.query({ name })).state || "unknown");
+  } catch {
+    return "unknown";
+  }
+}
+
+function browserDiagnostic(permissions: { camera: string; microphone: string }): BrowserDiagnostic {
+  const supported = navigator.mediaDevices?.getSupportedConstraints?.() || {};
+  return {
+    secureContext: window.isSecureContext,
+    userAgent: navigator.userAgent,
+    api: {
+      mediaDevices: Boolean(navigator.mediaDevices),
+      getUserMedia: Boolean(navigator.mediaDevices?.getUserMedia),
+      enumerateDevices: Boolean(navigator.mediaDevices?.enumerateDevices),
+      getSupportedConstraints: Boolean(navigator.mediaDevices?.getSupportedConstraints),
+      trackCapabilities: typeof MediaStreamTrack !== "undefined" && typeof MediaStreamTrack.prototype.getCapabilities === "function",
+      trackSettings: typeof MediaStreamTrack !== "undefined" && typeof MediaStreamTrack.prototype.getSettings === "function",
+      webRTC: Boolean((globalThis as any).RTCPeerConnection),
+      codecCapabilities: Boolean((globalThis as any).RTCRtpSender?.getCapabilities),
+      mediaCapabilitiesEncoding: typeof (navigator as any).mediaCapabilities?.encodingInfo === "function",
+    },
+    permissions,
+    supportedConstraints: Object.fromEntries(Object.entries(supported).map(([key, value]) => [key, value === true])),
+  };
+}
+
+function audioCodecList(kind: "audio" | "video"): string[] {
+  const sender = (globalThis as any).RTCRtpSender?.getCapabilities?.(kind)?.codecs || [];
+  return sender.map(codecDescription).filter(Boolean);
+}
+
+function receiverCodecList(kind: "audio" | "video"): string[] {
+  const receiver = (globalThis as any).RTCRtpReceiver?.getCapabilities?.(kind)?.codecs || [];
+  return receiver.map(codecDescription).filter(Boolean);
+}
+
+export async function runDeviceCheck(onProgress?: (message: string) => void): Promise<DeviceCheckReport> {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera API tidak tersedia. Buka halaman ini melalui HTTPS atau localhost.");
+
+  onProgress?.("Meminta izin kamera...");
+  let cameraPermissionStream: MediaStream | null = null;
+  let cameraError = "";
+  try {
+    cameraPermissionStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  } catch (error) {
+    cameraError = mediaAccessError(error, "camera").message;
+  } finally {
+    cameraPermissionStream?.getTracks().forEach((track) => track.stop());
+  }
+
+  onProgress?.("Meminta izin mikrofon...");
+  let audioPermissionStream: MediaStream | null = null;
+  let audioError = "";
+  try {
+    audioPermissionStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch (error) {
+    audioError = mediaAccessError(error, "microphone").message;
+  }
+
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cameras = devices.filter((device) => device.kind === "videoinput");
+  const microphones = devices.filter((device) => device.kind === "audioinput");
+  const cameraDiagnostics: CameraDiagnostic[] = [];
+  for (const [index, camera] of cameras.entries()) {
+    onProgress?.(`Memeriksa kamera ${index + 1}/${cameras.length}...`);
+    cameraDiagnostics.push(await inspectCameraWithProbes(camera));
+  }
+
+  let activeAudio: AudioTrackSnapshot | null = null;
+  let audioCapabilities: AudioCapabilitySnapshot | null = null;
+  const audioTrack = audioPermissionStream?.getAudioTracks()[0];
+  if (audioTrack) {
+    activeAudio = snapshotAudioTrack(audioTrack.getSettings());
+    audioCapabilities = snapshotAudioCapabilities(audioTrack.getCapabilities?.() || {});
+  }
+  audioPermissionStream?.getTracks().forEach((track) => track.stop());
+
+  onProgress?.("Memeriksa encoder WebRTC...");
+  const codecs = await probeVideoCodecDiagnostics();
+  const permissions = {
+    camera: cameraPermissionStream ? "granted" : await permissionState("camera"),
+    microphone: audioPermissionStream ? "granted" : await permissionState("microphone"),
+  };
+  const audio: AudioDiagnostic = {
+    devices: microphones.map((device) => ({ deviceId: device.deviceId, groupId: device.groupId, label: device.label || "Mikrofon tanpa nama" })),
+    active: activeAudio,
+    capabilities: audioCapabilities,
+    senderCodecs: audioCodecList("audio"),
+    receiverCodecs: receiverCodecList("audio"),
+    opusSupported: audioCodecList("audio").some((codec) => codec.toLowerCase().startsWith("audio/opus")),
+    permission: permissions.microphone,
+    error: audioError || undefined,
+  };
+  if (cameraError && cameraDiagnostics.length === 0) {
+    cameraDiagnostics.push({
+      deviceId: "",
+      label: "Kamera tidak bisa diakses",
+      capabilities: null,
+      initial: null,
+      ratioChecks: [],
+      resolutionChecks: [],
+      error: cameraError,
+    });
+  }
+
+  return {
+    checkedAt: new Date().toISOString(),
+    browser: browserDiagnostic(permissions),
+    cameras: cameraDiagnostics,
+    audio,
+    codecs,
+  };
 }
 
 export function assertBrowserMediaSupport(audioEnabled = true): void {
