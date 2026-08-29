@@ -1,13 +1,14 @@
 # VDO Relay
 
 VDO Relay adalah relay kamera untuk Android Chrome dan desktop Chrome.
-Browser membuka kamera dan mikrofon, memilih target track portrait 9:16 dengan
-constraint ideal, lalu mengirim track melalui WHIP/WebRTC ke MediaMTX. Job baru
-dikunci portrait; frame tidak diputar atau di-canvas. MediaMTX tidak melakukan
-transcoding; hasilnya dibaca OBS melalui SRT.
+Browser membuka kamera dan mikrofon pada mode native terbaik yang bisa diekspos,
+memotong frame bagian tengah dengan Canvas 2D ke output portrait 9:16, lalu
+mengirim track hasil canvas melalui WHIP/WebRTC ke MediaMTX. MediaMTX tidak
+melakukan transcoding; hasilnya dibaca OBS melalui SRT.
 
 ```text
 Chrome camera + microphone
+        │  Canvas 2D center-crop + scale
         │  WebRTC / WHIP
         ▼
 MediaMTX  ───────────────► SRT read URL ─► OBS
@@ -18,7 +19,8 @@ MediaMTX  ───────────────► SRT read URL ─► O
 WHIP dipakai karena browser sudah menangani codec negotiation, congestion
 control, dan ICE. Client kecil di frontend melakukan retry session jika
 koneksi WHIP putus. Project ini tidak memakai MoQ, WebTransport, WebCodecs,
-canvas, atau framing media custom.
+atau framing media custom; Canvas 2D hanya menjadi compositor video sebelum
+track masuk ke WebRTC.
 
 ## Setup Ubuntu
 
@@ -101,17 +103,17 @@ tidak merender ulang file tersebut.
 ## Alur penggunaan
 
 1. Login dengan `admin/admin` pada instalasi baru, lalu ganti password.
-2. Job baru selalu memakai portrait lock dengan target track 9:16; tidak ada
-   pilihan orientasi landscape.
+2. Job baru memilih output portrait 9:16 untuk Canvas 2D; orientasi sumber
+   kamera tidak dipakai sebagai ukuran output.
 3. Tekan Deteksi. Browser meminta izin kamera dan mikrofon.
-4. Pilih kamera. Resolusi/FPS hanya menampilkan target track portrait 9:16 yang
-   berhasil diuji dengan constraint `ideal` dan track aktif. Kamera 4:3 boleh
-   di-crop dan di-scale oleh pipeline browser; ukuran native kamera hanya
-   ditampilkan sebagai kemampuan sensor, bukan pilihan output.
+4. Pilih kamera. Resolusi/FPS adalah target output Canvas 2D. Browser terlebih
+   dahulu membuka sumber native terbesar yang tersedia, lalu kamera 4:3 dipotong
+   bagian tengah dan di-scale ke output portrait; ukuran native kamera hanya
+   ditampilkan sebagai kemampuan sumber.
 5. Pilih codec WebRTC yang tersedia, audio Opus, bitrate maksimum, dan record.
 6. Tekan `Create stream`. Ini hanya membuat job dan URL; kamera belum live.
-7. Di halaman job, tekan `Start`. Kamera dibuka ulang, diuji lagi, lalu WHIP
-   dimulai.
+7. Di halaman job, tekan `Start`. Kamera dibuka ulang, Canvas 2D dimulai, lalu
+   track hasil canvas dikirim melalui WHIP.
 8. Copy SRT URL dari tombol `OBS / SRT` di layar live atau dari Result. URL dan
    token tetap sama ketika job di-stop lalu dibuka kembali dari dashboard.
 
@@ -121,25 +123,20 @@ OBS melalui SRT dan player browser melalui WHEP.
 
 ## Kamera dan codec
 
-Resolusi/FPS yang dipilih adalah target track yang dikirim; ukuran/FPS aktual
-diverifikasi setelah browser membuka kamera.
-Detector menguji preset portrait 1080×1920, 720×1280, dan 480×854 dengan
-`width`, `height`, dan `aspectRatio` `ideal`, serta
-`frameRate` `ideal` dengan batas `max`. Width/height tidak diberi batas `max`
-karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
-batas atas.
-Browser mencoba crop-and-scale sebagai preferensi, lalu mode wajib bila perlu,
-dan hanya menerima hasil live yang memenuhi ukuran minimum serta rasio target
-9:16. Percobaan native terakhir hanya diterima jika kamera memang menyediakan
-mode 9:16; 4:3 tidak pernah diterima sebagai fallback.
+Resolusi/FPS yang dipilih adalah target canvas yang dikirim setelah encoding
+WebRTC; ukuran/FPS sumber native dicatat terpisah.
+Browser membuka track sumber dengan width/height ideal, tanpa memaksa aspect ratio
+output. Beberapa target diminta berurutan dan track dengan area terbesar dipakai,
+sehingga sensor 4:3 tetap dapat digunakan meski ukuran sumber yang dilaporkan
+berorientasi portrait oleh Chrome.
 
 Semantik `resizeMode` mengikuti [MediaTrackConstraints di MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints).
 
-`crop-and-scale` dilakukan oleh pipeline media browser/OS, bukan canvas, dan
-tidak menjamin bahwa setiap perangkat memakai ISP hardware untuk proses crop.
-Tidak ada rotate atau transcoding server. Jika jaminan hardware ISP/encoder
-wajib, diperlukan aplikasi native Android Camera2/MediaCodec. Black bar desktop
-hanya bagian kotak preview.
+Canvas 2D memotong area tengah sumber ke ukuran output yang dipilih, lalu
+`canvas.captureStream()` menjadi track video WHIP. Crop/scale canvas bukan bukti
+bahwa ISP hardware yang bekerja; prosesnya dapat memakai CPU atau GPU tergantung
+browser. WebRTC tetap melakukan encoding track output dan dapat memakai encoder
+hardware yang lolos preflight. Server tidak melakukan transcoding.
 
 Saat aplikasi menemukan job lama yang menyimpan ukuran 4:3, migrasi database
 mengubahnya ke 1920×1080 atau 1080×1920 sesuai orientasi job. Link stream tetap
@@ -220,7 +217,7 @@ halaman HTTP biasa selain pengecualian localhost tertentu.
 cmd/vdo/                         entrypoint Go
 internal/app/                    API, SQLite, auth, lifecycle MediaMTX
 frontend/src/App.svelte          routing dashboard/setup/live/result/player
-frontend/src/lib/media.ts        capability dan ideal output capture
+frontend/src/lib/media.ts        capability, native source, dan Canvas 2D output
 frontend/src/lib/mediamtx-webrtc-publisher.js  WHIP publisher
 frontend/src/lib/mediamtx-webrtc-reader.js     WHEP player
 deploy/nginx/vdo-relay.conf      vhost port 80 sebelum Certbot

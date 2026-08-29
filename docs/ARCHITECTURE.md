@@ -6,8 +6,9 @@
 ┌─────────────────────────────┐
 │ Android/Desktop Chrome      │
 │ getUserMedia                 │
-│ ideal output track + crop    │
-│ and scale + Opus             │
+│ native camera source         │
+│ Canvas 2D crop + scale       │
+│ output track + Opus          │
 │ RTCPeerConnection / WHIP     │
 └──────────────┬──────────────┘
                │ HTTPS SDP : media.example.com
@@ -34,8 +35,9 @@ membuat `RTCPeerConnection`, mengirim SDP, dan melakukan trickle ICE. Browser
 sendiri menangani packetization, congestion control, dan jaringan.
 
 Pipeline tidak memiliki `VideoEncoder`, `AudioEncoder`, `MediaStreamTrackProcessor`,
-WebTransport, MoQ, canvas capture, atau framing media custom. Ini menghilangkan
-sumber masalah queue serial dan adaptive bitrate palsu pada implementasi lama.
+WebTransport, MoQ, atau framing media custom. Canvas 2D hanya menjadi compositor
+video sebelum track masuk ke WebRTC; packetization dan congestion control tetap
+ditangani browser.
 
 MediaMTX mendokumentasikan endpoint publish `/path/whip` dan read `/path/whep`.
 [Dokumentasi WebRTC MediaMTX](https://mediamtx.org/docs/publish/webrtc-clients)
@@ -55,7 +57,7 @@ src/App.svelte
 
 src/lib/media.ts
   ├─ permission + device enumeration
-  ├─ ideal output profile probe
+  ├─ native source probe + canvas output
   ├─ WebRTC capability probe
   └─ getUserMedia capture
 
@@ -68,29 +70,22 @@ src/lib/mediamtx-webrtc-reader.js
 
 ### Capture semantics
 
-Output `getUserMedia` memakai `width`, `height`, dan `aspectRatio` `ideal`, serta
-`frameRate` `ideal` dengan batas `max`. Width/height tidak memiliki batas `max`
-karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
-batas atas. Browser dicoba
-dengan crop-and-scale sebagai preferensi, lalu sebagai mode wajib bila perlu,
-dan terakhir tanpa resize mode untuk kamera yang memiliki mode native 9:16.
-Detector menguji target track portrait 9:16 yang ditentukan aplikasi dan
-menerima hasil hanya selama track aktif, ukurannya tidak di bawah target, dan
-rasio `getSettings()` mendekati 9:16. Kemampuan sensor native seperti
-2304×1728 hanya dipakai sebagai informasi dan filter; 4:3 tidak pernah menjadi
-fallback.
+`getUserMedia` memakai width/height `ideal`, frameRate `ideal` dengan batas `max`,
+dan `resizeMode: { ideal: "none" }`. Tidak ada aspect ratio output yang dipaksa
+pada kamera sumber. Beberapa pasangan dimensi dicoba, lalu track live dengan
+area terbesar dipakai. Detector memfilter target output canvas berdasarkan dimensi
+sumber terbesar yang dilaporkan browser.
 
 Saat startup, migrasi SQLite mengubah profile job lama yang bukan 16:9/9:16 ke
 1920×1080 atau 1080×1920 berdasarkan `portrait_mode`. Path, token, dan recording
 metadata tidak berubah.
 
-Dengan demikian kamera 4:3 dapat diminta menjadi 1080×1920 tanpa canvas:
-browser/OS memotong area 4:3 dan menurunkannya ke track 9:16. Spesifikasi
-`crop-and-scale` tidak menjamin implementasi crop tertentu berjalan di ISP
-hardware; jaminan hardware-only membutuhkan native Android Camera2/MediaCodec.
-`LiveView` tidak memutar preview dengan CSS. Stage mobile dan track encoded job
-baru tetap portrait; jika operator memiringkan HP, rotasi akhir dapat dilakukan
-di OBS.
+Canvas 2D memotong bagian tengah sumber sesuai rasio output dan men-scale hasil
+ke ukuran job. `canvas.captureStream()` menjadi video track yang diberikan ke
+WHIP, sedangkan track kamera sumber tetap dipakai untuk zoom/torch. Compositing
+canvas dapat memakai CPU atau GPU sesuai browser; encoder WebRTC tetap dapat
+hardware accelerated, tetapi hardware-only untuk compositor tidak dijamin.
+`LiveView` menampilkan track hasil canvas sehingga preview dan output WHIP sama.
 
 ### Codec
 

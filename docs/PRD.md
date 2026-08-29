@@ -11,7 +11,8 @@ dan mengeluarkan SRT. Server tidak mentranscode video.
 
 ```text
 getUserMedia
-  -> MediaStream track output target (crop-and-scale bila perlu)
+  -> kamera native terbaik
+  -> Canvas 2D center-crop + scale ke output target
   -> WebRTC / WHIP
   -> MediaMTX
   -> SRT read / OBS
@@ -20,7 +21,8 @@ getUserMedia
 WHIP dipilih untuk browser karena browser sudah menyediakan negotiation codec,
 ICE, congestion control, packetization, dan koneksi WebRTC. Client frontend
 melakukan retry session bila koneksi WHIP putus. V1 tidak memakai MoQ,
-WebTransport, WebCodecs, canvas capture, atau framing protokol custom.
+WebTransport, WebCodecs, atau framing protokol custom; Canvas 2D menjadi
+compositor video sebelum track masuk ke WebRTC.
 
 Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-clients),
 [MediaMTX SRT](https://mediamtx.org/docs/read/srt).
@@ -40,29 +42,26 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 ### Membuat job
 
-1. Job baru selalu memakai portrait lock dengan track encoded 9:16; browser
-   tidak boleh melakukan rotasi/canvas.
+1. Job baru memilih ukuran output portrait 9:16 untuk Canvas 2D. Browser
+   tetap membuka sumber kamera native tanpa memaksa rasio output.
 2. Operator menekan Deteksi dan memberi izin kamera serta mikrofon.
 3. Sistem menampilkan kamera yang ditemukan, kemampuan maksimum, zoom, dan
-   torch bila dilaporkan browser.
-4. Sistem menguji kombinasi resolusi/FPS track dengan constraint `ideal` pada
-   kamera yang dipilih, termasuk aspect ratio 9:16 dan `crop-and-scale`.
-5. Kombinasi ditampilkan bila track live, ukurannya minimal memenuhi target, dan
-   rasio aktual mendekati 9:16. FPS boleh sedikit lebih tinggi dari target
-   selama tidak melewati batas max.
-6. Operator memilih codec WebRTC yang tersedia, audio Opus, max bitrate, dan
+  torch bila dilaporkan browser.
+4. Sistem membuka sumber native terbesar yang tersedia dengan constraint dimensi
+   `ideal`, lalu menampilkan target output canvas yang masih masuk akal terhadap
+   ukuran sumber dan FPS yang dilaporkan.
+5. Operator memilih target output, codec WebRTC, audio Opus, max bitrate, dan
    optional recording.
-7. `Create stream` membuat job/path/token saja; kamera belum dimulai.
+6. `Create stream` membuat job/path/token saja; kamera belum dimulai.
 
 ### Menjalankan job
 
 1. Halaman live menampilkan preview standby.
 2. Operator menekan `Start`.
-3. Browser membuka kamera/mikrofon lagi dengan profile output ideal yang
-   tersimpan.
-4. Track harus aktif dan rasio `getSettings()` harus mendekati 9:16. Kamera
-   4:3 boleh dipotong dan diperkecil oleh pipeline `crop-and-scale`; tidak ada
-   canvas, rotate, atau fallback ukuran diam-diam.
+3. Browser membuka kamera/mikrofon lagi pada mode native terbaik yang berhasil.
+4. Canvas 2D memotong bagian tengah sumber ke ukuran output yang tersimpan dan
+   `canvas.captureStream()` menjadi video track WHIP. Track kamera sumber tetap
+   dipakai untuk kontrol zoom/torch dan tidak dikirim langsung ke WHIP.
 5. Browser membuat peer connection dan mengirim SDP WHIP ke MediaMTX.
 6. Setelah WebRTC connected, MediaMTX path menjadi live.
 7. `Stop` menghentikan track dan sesi WHIP, tetapi job tetap tersedia di Home.
@@ -86,24 +85,16 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 ### Video
 
-- Resolusi dan FPS adalah target encoded track, bukan ukuran sensor; probe hanya
-  menerima track dengan ukuran minimal target dan FPS tidak di bawah target.
-- Probe hanya menawarkan target portrait 1080×1920, 720×1280, dan 480×854 pada
-  FPS 24/30/60 (serta FPS maksimum/default yang dilaporkan).
-- Setiap target diuji dengan `width`, `height`, dan `aspectRatio` `ideal`, serta
-  `frameRate` `ideal` dengan batas `max`. Width/height tidak diberi batas `max`
-  karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
-  batas atas. Browser mencoba crop-and-scale sebagai preferensi, lalu mode wajib
-  bila perlu, dan terakhir mode native; mode terakhir hanya diterima bila hasil
-  live tetap memenuhi ukuran target dan rasio 9:16.
-- Kemampuan sensor native, misalnya 2304×1728, hanya ditampilkan sebagai
-  informasi kamera. Kamera 4:3 dapat dipotong ke 1920×1080 jika browser
-  menyetujui pipeline crop-and-scale; ukuran 4:3 tidak menjadi output job.
-- Definisi browser untuk `crop-and-scale` mengikuti [MediaTrackConstraints di
-  MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints).
-- `crop-and-scale` adalah kemampuan pipeline browser/OS dan tidak menjamin
-  crop berjalan di ISP hardware. Jaminan hardware-only membutuhkan aplikasi
-  native Android Camera2/MediaCodec.
+ - Resolusi dan FPS adalah target output canvas yang kemudian dikodekan WebRTC;
+   ukuran sumber native dicatat terpisah.
+ - Probe membuka sumber native dengan width/height ideal dan resizeMode ideal none,
+   mencoba beberapa pasangan dimensi, lalu memilih track live dengan area terbesar.
+ - Canvas 2D melakukan center-crop sesuai rasio target dan men-scale hasil ke
+   ukuran output. canvas.captureStream() menjadi satu-satunya video track
+   yang dikirim melalui WHIP; MediaMTX tetap tidak melakukan transcoding.
+ - Crop/scale Canvas 2D dapat memakai CPU atau GPU tergantung browser/perangkat.
+   Encoder WebRTC masih dapat memakai hardware bila preflight codec lolos,
+   tetapi browser tidak memberi jaminan hardware-only untuk compositor canvas.
 - Migrasi startup mengubah profile job lama yang bukan 16:9/9:16 menjadi
   1920×1080 atau 1080×1920 sesuai `portraitMode`; path dan token tidak berubah.
 - Job lama yang sempat menyimpan portrait profile 1920×1080 dinormalisasi ke
@@ -239,7 +230,8 @@ dan UDP 8890 untuk SRT tetap direct.
 - Create tidak meminta kamera live; Start yang membuka kamera.
 - Stop lalu buka ulang dari dashboard memakai URL SRT yang sama.
 - Token salah untuk WHIP/WHEP/SRT ditolak.
-- Tidak ada canvas, WebCodecs, WebTransport, atau MoQ di pipeline browser.
+ - Canvas 2D dipakai untuk center-crop dan scale sebelum WHIP; WebCodecs,
+   WebTransport, dan MoQ tidak dipakai di pipeline browser.
 - Recording off tidak membuat file; recording on menghasilkan fMP4 yang dapat
   di-download dan dihapus.
 - 8 job tetap menjadi limit awal dan setiap job memiliki maksimum 10 reader
