@@ -21,7 +21,7 @@ assert.match(create, /await createStream\(/, "Create must allocate the server jo
 assert.ok(create.indexOf("await probeVideoCodecs(") < create.indexOf("await createStream("), "Codec validation must happen before the server job is created");
 assert.doesNotMatch(create, /await handlePublishStart\(\)/, "Creating a job must not open the camera automatically");
 assert.match(setup, /probeCameraProfiles\(/, "Setup must probe camera modes");
-assert.match(setup, /portraitMode: true/, "New jobs must use the fixed portrait output");
+assert.match(setup, /portraitMode: false/, "New jobs must leave orientation to the native camera track");
 assert.doesNotMatch(setup, /output-orientation|value="landscape"/, "New job setup must not offer landscape mode");
 assert.doesNotMatch(setup, /[\u00c2\u00c3\u00e2\ufffd]/u, "Setup copy must not contain mojibake characters");
 assert.match(setup, /profileSupported/, "Create must stay disabled until the selected camera mode passes");
@@ -37,20 +37,18 @@ assert.match(dashboard, /onDeviceCheck/, "The dashboard must expose the device d
 assert.match(source, /page === "device-check"/, "The app must render the device diagnostics page");
 assert.match(source, /window\.location\.pathname === "\/device-check"/, "The device diagnostics page must be deep-linkable");
 assert.match(dashboard, /on:click=\{\(\) => onOpenStream\(stream\)\}/, "Stopped jobs must remain reopenable");
-assert.match(source, /trackWidth = stream\.portraitMode/, "Legacy portrait jobs must normalize to the portrait track layout");
+assert.doesNotMatch(source, /trackWidth = stream\.portraitMode/, "Reopening a job must not swap native camera dimensions");
 assert.match(live, /onLeaveHome/, "Live view must provide a reusable Home action");
 assert.match(media, /frameRate: \{ ideal: fps, max: fps \}/, "Camera FPS must use an ideal target and a max ceiling");
 assert.match(media, /defaultWidth/, "Camera probe must retain the default native dimensions");
 assert.match(media, /device\?\.maxWidth/, "Camera probe must use dimensions reported by capabilities");
 assert.match(media, /width: \{ ideal: target\.width \}/, "Native camera width must use an ideal target");
 assert.match(media, /height: \{ ideal: target\.height \}/, "Native camera height must use an ideal target");
-assert.match(media, /requestNativeCamera/, "Capture must open a native camera source before compositing");
-assert.match(media, /resizeMode: \{ ideal: "none" \}/, "Native capture must prefer the unscaled camera source");
-assert.match(media, /const width = portrait \? resolution\.height/, "Canvas output choices must preserve portrait dimensions");
-assert.match(media, /createCanvasOutput/, "Capture must create the canvas output");
-assert.match(media, /document\.createElement\("canvas"\)/, "Capture must create a canvas compositor");
-assert.match(media, /canvas\.captureStream/, "Canvas output must become the WebRTC stream");
-assert.match(media, /context\.drawImage/, "Canvas output must center-crop and scale each frame");
+assert.match(media, /requestNativeCamera/, "Capture must open a native camera source");
+assert.doesNotMatch(media, /resizeMode: \{ ideal: "none" \}/, "Native capture must not disable browser crop-and-scale");
+assert.match(media, /const \{ width, height \} = resolution/, "Camera profiles must keep canonical dimensions");
+assert.match(media, /const stream = sourceStream/, "WHIP must receive the native camera stream");
+assert.doesNotMatch(media, /createCanvasOutput|document\.createElement\("canvas"\)|canvas\.captureStream|context\.drawImage/, "Native camera flow must not rasterize through a canvas");
 assert.match(media, /sourceWidth/, "Capture diagnostics must retain the native source dimensions");
 assert.doesNotMatch(`${source}\n${live}\n${media}`, /screen\.orientation\.lock/, "Camera crop test must not depend on screen orientation lock");
 assert.match(media, /readyState !== "live"/, "Native camera capture must reject an inactive track");
@@ -106,4 +104,4 @@ assert.doesNotMatch(publisher, /WebTransport|VideoEncoder|MediaStreamTrackProces
 assert.match(reader, /method: "POST"/, "WHEP reader must send an SDP offer");
 assert.match(reader, /ontrack/, "WHEP reader must attach the remote track to the player");
 
-console.log("native camera source, Canvas 2D crop, hardware codec lock, WHIP/WHEP media flow, reusable jobs, and mobile layout checks: ok");
+console.log("native camera source, hardware codec lock, WHIP/WHEP media flow, reusable jobs, and mobile layout checks: ok");

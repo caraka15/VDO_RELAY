@@ -34,12 +34,14 @@
   let audioMeterTimer: number | null = null;
   let lastCapture: CaptureSession | null = null;
 
-  $: outputOrientation = stream.portraitMode ? "PORTRAIT" : "LANDSCAPE";
+  $: outputOrientation = capture
+    ? capture.actualHeight > capture.actualWidth ? "PORTRAIT" : capture.actualWidth > capture.actualHeight ? "LANDSCAPE" : "SQUARE"
+    : stream.portraitMode ? "PORTRAIT" : "LANDSCAPE";
   $: selectedCamera = cameraDevices.find((device) => device.deviceId === deviceId);
   $: statusLabel = publisherStatus === "ready" ? "READY" : publisherStatus === "live" ? "LIVE" : publisherStatus === "error" ? "ERROR" : "CONNECTING";
   $: statusColor = publisherStatus === "ready" ? "var(--accent)" : publisherStatus === "live" ? "var(--success)" : publisherStatus === "error" ? "var(--danger)" : "var(--warning)";
   $: pageTitle = publisherStatus === "ready" ? "Job siap" : publisherStatus === "live" ? "Output sedang berjalan" : publisherStatus === "error" ? "Start belum berhasil" : "Menyiapkan output";
-  $: pageDescription = publisherStatus === "ready" || publisherStatus === "error" ? "Tekan Start untuk membuka kamera dan mengirim hasil canvas melalui WHIP." : "Preview mengikuti kamera langsung. Orientasi, resolusi, dan FPS tetap terkunci.";
+  $: pageDescription = publisherStatus === "ready" || publisherStatus === "error" ? "Tekan Start untuk membuka kamera dan mengirim track native langsung melalui WHIP." : "Preview mengikuti track kamera langsung. Orientasi dibaca Chrome dari perangkat.";
   $: videoCapabilities = capture?.videoTrack?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean; zoom?: { min?: number; max?: number; step?: number } }) | undefined;
   $: torchSupported = videoCapabilities?.torch === true;
   $: zoomCapability = videoCapabilities?.zoom;
@@ -135,7 +137,7 @@
           <video bind:this={previewVideo} class="preview-video" autoplay muted playsinline aria-label="Preview kamera langsung"></video>
           <div class="stage-status pointer-events-none absolute inset-x-3 top-3 z-10 flex items-start justify-between gap-2 sm:inset-x-4">
             <div class="stage-status-card"><span class="inline-flex items-center gap-1.5"><span class="status-dot" style={`color:${publisherStatus === "live" ? "var(--success)" : statusColor}`}></span><span class="mono">{statusLabel}</span></span><span class="stage-status-detail">CAMERA INPUT · {capture ? "ACTIVE" : "STANDBY"}</span></div>
-            <div class="stage-status-card text-right"><span class="mono">{outputOrientation} · LOCKED</span><span class="stage-status-detail">MIC {audioLive ? (muted ? "MUTED" : "LIVE") : stream.audioEnabled ? "WAIT" : "OFF"}</span></div>
+            <div class="stage-status-card text-right"><span class="mono">{outputOrientation} · NATIVE</span><span class="stage-status-detail">MIC {audioLive ? (muted ? "MUTED" : "LIVE") : stream.audioEnabled ? "WAIT" : "OFF"}</span></div>
           </div>
           <button class="button-secondary pointer-events-auto absolute right-3 top-[4.5rem] z-10 inline-flex min-h-[40px] items-center gap-1.5 px-2.5 text-xs font-extrabold md:hidden" type="button" on:click={() => (linksOpen = !linksOpen)} aria-expanded={linksOpen} aria-controls="live-links-panel"><Radio size={16} /><span>SRT</span></button>
           {#if publisherError}<div class="stage-error absolute inset-x-3 top-20 z-10 gap-2 border border-[#844a52] bg-[#321c22] p-3 text-xs font-bold text-[var(--danger)]" role="alert"><AlertCircle size={17} class="mt-0.5 shrink-0" /><span>{publisherError}</span></div>{/if}

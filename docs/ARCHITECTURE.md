@@ -6,8 +6,8 @@
 ┌─────────────────────────────┐
 │ Android/Desktop Chrome      │
 │ getUserMedia                 │
-│ native camera source         │
-│ Canvas 2D crop + scale       │
+│ native camera track          │
+│ native orientation/scale     │
 │ output track + Opus          │
 │ RTCPeerConnection / WHIP     │
 └──────────────┬──────────────┘
@@ -35,9 +35,8 @@ membuat `RTCPeerConnection`, mengirim SDP, dan melakukan trickle ICE. Browser
 sendiri menangani packetization, congestion control, dan jaringan.
 
 Pipeline tidak memiliki `VideoEncoder`, `AudioEncoder`, `MediaStreamTrackProcessor`,
-WebTransport, MoQ, atau framing media custom. Canvas 2D hanya menjadi compositor
-video sebelum track masuk ke WebRTC; packetization dan congestion control tetap
-ditangani browser.
+WebTransport, MoQ, atau framing media custom. Track kamera native masuk langsung
+ke WebRTC; packetization dan congestion control tetap ditangani browser.
 
 MediaMTX mendokumentasikan endpoint publish `/path/whip` dan read `/path/whep`.
 [Dokumentasi WebRTC MediaMTX](https://mediamtx.org/docs/publish/webrtc-clients)
@@ -57,7 +56,7 @@ src/App.svelte
 
 src/lib/media.ts
   ├─ permission + device enumeration
-  ├─ native source probe + canvas output
+  ├─ native source probe + direct track
   ├─ WebRTC capability probe
   └─ getUserMedia capture
 
@@ -70,22 +69,20 @@ src/lib/mediamtx-webrtc-reader.js
 
 ### Capture semantics
 
-`getUserMedia` memakai width/height `ideal`, frameRate `ideal` dengan batas `max`,
-dan `resizeMode: { ideal: "none" }`. Tidak ada aspect ratio output yang dipaksa
-pada kamera sumber. Beberapa pasangan dimensi dicoba, lalu track live dengan
-area terbesar dipakai. Detector memfilter target output canvas berdasarkan dimensi
-sumber terbesar yang dilaporkan browser.
+`getUserMedia` memakai width/height `ideal` dan frameRate `ideal` dengan batas
+`max`. Tidak ada aspect ratio atau `resizeMode: "none"` yang dipaksa pada sumber.
+Satu permintaan native dibuat untuk setiap Start; Chrome boleh melakukan
+crop-and-scale internal dan mengembalikan dimensi terrotasi saat HP portrait.
+Detector memfilter preferensi berdasarkan dimensi terbesar yang dilaporkan browser.
 
 Saat startup, migrasi SQLite mengubah profile job lama yang bukan 16:9/9:16 ke
 1920×1080 atau 1080×1920 berdasarkan `portrait_mode`. Path, token, dan recording
 metadata tidak berubah.
 
-Canvas 2D memotong bagian tengah sumber sesuai rasio output dan men-scale hasil
-ke ukuran job. `canvas.captureStream()` menjadi video track yang diberikan ke
-WHIP, sedangkan track kamera sumber tetap dipakai untuk zoom/torch. Compositing
-canvas dapat memakai CPU atau GPU sesuai browser; encoder WebRTC tetap dapat
-hardware accelerated, tetapi hardware-only untuk compositor tidak dijamin.
-`LiveView` menampilkan track hasil canvas sehingga preview dan output WHIP sama.
+Track kamera sumber dan audio native diberikan langsung ke WHIP. `LiveView`
+menampilkan track yang sama sehingga tidak ada frame loop, copy pixel, atau
+compositor kedua di frontend. Jika Chrome tidak mengembalikan rasio yang
+diinginkan, penyesuaian dilakukan di kamera native atau OBS.
 
 ### Codec
 

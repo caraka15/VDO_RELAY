@@ -285,14 +285,12 @@
       if (!stream.whipUrl || !stream.publishToken || !stream.srtUrl) {
         throw new Error("URL job tidak tersedia. Hapus job ini lalu buat job baru.");
       }
-      const trackWidth = stream.portraitMode && stream.width > stream.height ? stream.height : stream.width;
-      const trackHeight = stream.portraitMode && stream.width > stream.height ? stream.width : stream.height;
       cleanupLive();
-      liveStream = { ...stream, width: trackWidth, height: trackHeight };
+      liveStream = stream;
       preparedInput = {
         codec: stream.codec,
-        width: trackWidth,
-        height: trackHeight,
+        width: stream.width,
+        height: stream.height,
         fps: stream.fps,
         maxBitrateKbps: stream.maxBitrateKbps,
         audioCodec: stream.audioCodec || "opus",
