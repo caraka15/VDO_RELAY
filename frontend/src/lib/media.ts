@@ -307,8 +307,9 @@ function idealCameraConstraints(profile: CameraProfile, deviceId?: string, resiz
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     ...(!deviceId ? { facingMode: { ideal: "environment" } } : {}),
     // Do not add width/height max constraints here. Android camera HALs can
-    // reject crop-and-scale when both dimensions are capped. Both target axes
-    // stay ideal: Android needs the portrait pair to choose a portrait track.
+    // reject crop-and-scale when both dimensions are capped. The browser may
+    // use landscape as its primary orientation, so the caller tries both axis
+    // orders and validates the dimensions returned by the live track.
     width: { ideal: profile.width },
     height: { ideal: profile.height },
     aspectRatio: { ideal: profile.width / profile.height },
@@ -317,6 +318,11 @@ function idealCameraConstraints(profile: CameraProfile, deviceId?: string, resiz
   if (resizeMode === "ideal") constraints.resizeMode = { ideal: "crop-and-scale" };
   if (resizeMode === "required") constraints.resizeMode = "crop-and-scale";
   return constraints as MediaTrackConstraints;
+}
+
+function constraintProfilesForTarget(profile: CameraProfile): CameraProfile[] {
+  const swapped = { width: profile.height, height: profile.width, fps: profile.fps };
+  return profile.height > profile.width ? [swapped, profile] : [profile, swapped];
 }
 
 async function applyIdealCameraProfile(track: MediaStreamTrack, profile: CameraProfile, resizeMode: ResizeModeAttempt = "ideal"): Promise<void> {
@@ -371,29 +377,31 @@ async function requestCameraProfile(
   audio: MediaTrackConstraints | false,
 ): Promise<{ stream: MediaStream; track: MediaStreamTrack; settings: MediaTrackSettings }> {
   let lastError: unknown = null;
-  for (const resizeMode of ["ideal", "required", "native"] as const) {
-    let stream: MediaStream | null = null;
-    let accepted = false;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: idealCameraConstraints(profile, deviceId, resizeMode),
-        audio,
-      });
-      const track = stream.getVideoTracks()[0];
-      if (!track) throw new Error("Kamera tidak menghasilkan track video.");
-      await applyIdealCameraProfile(track, profile, resizeMode);
-      const settings = track.getSettings();
-      if (profileMatches(track, settings, profile)) {
-        accepted = true;
-        return { stream, track, settings };
+  for (const constraintProfile of constraintProfilesForTarget(profile)) {
+    for (const resizeMode of ["ideal", "required", "native"] as const) {
+      let stream: MediaStream | null = null;
+      let accepted = false;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: idealCameraConstraints(constraintProfile, deviceId, resizeMode),
+          audio,
+        });
+        const track = stream.getVideoTracks()[0];
+        if (!track) throw new Error("Kamera tidak menghasilkan track video.");
+        await applyIdealCameraProfile(track, constraintProfile, resizeMode);
+        const settings = track.getSettings();
+        if (profileMatches(track, settings, profile)) {
+          accepted = true;
+          return { stream, track, settings };
+        }
+        lastError = new Error("Kamera tidak menghasilkan target output yang diminta.");
+        continue;
+      } catch (error) {
+        lastError = error;
+        if (!canRetryCameraProfile(error)) throw error;
+      } finally {
+        if (!accepted) stream?.getTracks().forEach((track) => track.stop());
       }
-      lastError = new Error("Kamera tidak menghasilkan target output yang diminta.");
-      continue;
-    } catch (error) {
-      lastError = error;
-      if (!canRetryCameraProfile(error)) throw error;
-    } finally {
-      if (!accepted) stream?.getTracks().forEach((track) => track.stop());
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Kamera tidak menghasilkan target output yang diminta.");
@@ -721,43 +729,62 @@ function ratioProbeDimensions(targetRatio: number): { width: number; height: num
   return { width, height: Math.round(width / targetRatio) };
 }
 
+function constraintDimensionsForTarget(target: { width: number; height: number }): { width: number; height: number }[] {
+  const swapped = { width: target.height, height: target.width };
+  return target.height > target.width ? [swapped, target] : [target, swapped];
+}
+
 async function checkCameraRatio(deviceId: string, label: string, targetRatio: number): Promise<CameraRatioCheck> {
-  let stream: MediaStream | null = null;
-  try {
-    const target = ratioProbeDimensions(targetRatio);
-    const opened = await openDiagnosticCamera(deviceId, {
-      width: { ideal: target.width },
-      height: { ideal: target.height },
-      aspectRatio: { ideal: targetRatio },
-      resizeMode: { ideal: "crop-and-scale" } as any,
-    } as any);
-    stream = opened.stream;
-    const actual = snapshotTrack(opened.track.getSettings());
-    return { label, targetRatio, actual, status: ratioCheckStatus(actual, targetRatio) };
-  } catch (error) {
-    return { label, targetRatio, actual: null, status: "failed", error: error instanceof Error ? error.message : "Probe rasio gagal." };
-  } finally {
-    stream?.getTracks().forEach((track) => track.stop());
+  const target = ratioProbeDimensions(targetRatio);
+  let fallback: CameraRatioCheck | null = null;
+  let lastError = "Probe rasio gagal.";
+  for (const dimensions of constraintDimensionsForTarget(target)) {
+    let stream: MediaStream | null = null;
+    try {
+      const opened = await openDiagnosticCamera(deviceId, {
+        width: { ideal: dimensions.width },
+        height: { ideal: dimensions.height },
+        aspectRatio: { ideal: dimensions.width / dimensions.height },
+        resizeMode: { ideal: "crop-and-scale" } as any,
+      } as any);
+      stream = opened.stream;
+      const actual = snapshotTrack(opened.track.getSettings());
+      const result = { label, targetRatio, actual, status: ratioCheckStatus(actual, targetRatio) } as CameraRatioCheck;
+      if (result.status === "matched") return result;
+      fallback ||= result;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : lastError;
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+    }
   }
+  return fallback || { label, targetRatio, actual: null, status: "failed", error: lastError };
 }
 
 async function checkCameraResolution(deviceId: string, target: { label: string; width: number; height: number }): Promise<CameraResolutionCheck> {
-  let stream: MediaStream | null = null;
-  try {
-    const opened = await openDiagnosticCamera(deviceId, {
-      width: { ideal: target.width },
-      height: { ideal: target.height },
-      aspectRatio: { ideal: target.width / target.height },
-      resizeMode: { ideal: "crop-and-scale" } as any,
-    } as any);
-    stream = opened.stream;
-    const actual = snapshotTrack(opened.track.getSettings());
-    return { ...target, targetWidth: target.width, targetHeight: target.height, actual, status: resolutionCheckStatus(actual, target.width, target.height) };
-  } catch (error) {
-    return { ...target, targetWidth: target.width, targetHeight: target.height, actual: null, status: "failed", error: error instanceof Error ? error.message : "Probe resolusi gagal." };
-  } finally {
-    stream?.getTracks().forEach((track) => track.stop());
+  let fallback: CameraResolutionCheck | null = null;
+  let lastError = "Probe resolusi gagal.";
+  for (const dimensions of constraintDimensionsForTarget(target)) {
+    let stream: MediaStream | null = null;
+    try {
+      const opened = await openDiagnosticCamera(deviceId, {
+        width: { ideal: dimensions.width },
+        height: { ideal: dimensions.height },
+        aspectRatio: { ideal: dimensions.width / dimensions.height },
+        resizeMode: { ideal: "crop-and-scale" } as any,
+      } as any);
+      stream = opened.stream;
+      const actual = snapshotTrack(opened.track.getSettings());
+      const result = { ...target, targetWidth: target.width, targetHeight: target.height, actual, status: resolutionCheckStatus(actual, target.width, target.height) } as CameraResolutionCheck;
+      if (result.status === "exact" || result.status === "higher") return result;
+      fallback ||= result;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : lastError;
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+    }
   }
+  return fallback || { ...target, targetWidth: target.width, targetHeight: target.height, actual: null, status: "failed", error: lastError };
 }
 
 async function inspectCamera(device: MediaDeviceInfo): Promise<CameraDiagnostic> {

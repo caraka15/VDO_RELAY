@@ -48,6 +48,8 @@ assert.match(media, /aspectRatio: \{ ideal: profile\.width \/ profile\.height \}
 assert.match(media, /const targetPortrait = profile\.height > profile\.width/, "Camera verification must recognize portrait profiles");
 assert.match(media, /height: \{ ideal: profile\.height \}/, "Portrait camera constraints must include the target height");
 assert.doesNotMatch(media, /portrait \? \{\} : \{ height:/, "Portrait camera constraints must not drop the target height");
+assert.match(media, /constraintProfilesForTarget/, "Camera capture must try the browser primary orientation and its inverse");
+assert.match(media, /targetPortrait === actualPortrait/, "Camera capture must accept only the requested actual orientation");
 assert.match(media, /const width = portrait \? resolution\.height/, "Portrait probes must request portrait dimensions");
 assert.match(media, /resizeMode = "crop-and-scale"/, "Camera output must force browser crop-and-scale");
 assert.match(media, /applyIdealCameraProfile/, "Camera output must apply the target profile after opening the track");
