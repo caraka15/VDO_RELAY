@@ -72,6 +72,9 @@ assert.match(deviceCheck, /EncodingInfo probe/, "Device diagnostics must show co
 assert.match(deviceCheck, /Range capability/, "Device diagnostics must show camera capability ranges");
 assert.match(deviceCheck, /Uji rasio tanpa menentukan resolusi/, "Device diagnostics must separate ratio-only probes");
 assert.match(deviceCheck, /Audio input terdaftar/, "Device diagnostics must show microphone inputs");
+assert.match(deviceCheck, /JSON\.stringify\(report, null, 2\)/, "Device diagnostics JSON export must keep the complete report");
+assert.match(deviceCheck, /downloadReport\(html, .*\.html/, "Device diagnostics must export a complete HTML report");
+assert.match(deviceCheck, /overflow: visible/, "HTML export must not hide report content");
 assert.doesNotMatch(media, /VideoEncoder|AudioEncoder|MediaStreamTrackProcessor|WebTransport/, "The browser path must not implement a second media protocol");
 assert.match(live, /preview-video/, "Live preview must expose the real camera source");
 assert.match(live, /live-links-panel/, "Live view must expose SRT and player links without navigation");

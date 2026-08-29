@@ -155,6 +155,64 @@
       { label: "Auto gain control", value: joinValues(capabilities.autoGainControl) },
     ];
   }
+
+  function reportJson(): string {
+    return report ? JSON.stringify(report, null, 2) : "";
+  }
+
+  function fileStamp(): string {
+    return new Date().toISOString().replace(/[.:]/g, "-");
+  }
+
+  function downloadReport(content: string, filename: string, type: string) {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function saveJson() {
+    if (!report) return;
+    downloadReport(reportJson(), `vdo-device-check-${fileStamp()}.json`, "application/json;charset=utf-8");
+  }
+
+  function escapeHtml(value: string): string {
+    const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+    return value.replace(/[&<>"']/g, (character) => entities[character]);
+  }
+
+  function saveHtml() {
+    if (!report) return;
+    const json = escapeHtml(reportJson());
+    const lessThan = String.fromCharCode(60);
+    const styleOpen = `${lessThan}style>`;
+    const styleClose = `${lessThan}/style>`;
+    const html = `<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VDO Relay Device Check</title>
+  ${styleOpen}
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0e1116; color: #edf2f7; }
+    body { max-width: 1200px; margin: 0 auto; padding: 32px 20px; }
+    h1 { margin: 0 0 8px; }
+    p { color: #aab5c1; }
+    pre { border: 1px solid #455362; background: #151a21; padding: 16px; white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; }
+  ${styleClose}
+</head>
+<body>
+  <h1>VDO Relay Device Check</h1>
+  <p>Full report JSON. Tidak ada field yang dipotong.</p>
+  <pre>${json}</pre>
+</body>
+</html>`;
+    downloadReport(html, `vdo-device-check-${fileStamp()}.html`, "text/html;charset=utf-8");
+  }
 </script>
 
 <svelte:head>
@@ -186,6 +244,7 @@
       <div class="flex flex-wrap gap-2">
         <button class="button-secondary inline-flex items-center gap-2" type="button" on:click={onBack}><ArrowLeft size={17} /> Dashboard</button>
         <button class="button-primary inline-flex items-center gap-2" type="button" on:click={check} disabled={checking}><RefreshCw size={17} class={checking ? "animate-spin" : ""} /> {checking ? "Memeriksa..." : "Periksa perangkat"}</button>
+        {#if report}<button class="button-secondary inline-flex items-center gap-2" type="button" on:click={saveJson} disabled={checking}>Simpan JSON</button><button class="button-secondary inline-flex items-center gap-2" type="button" on:click={saveHtml} disabled={checking}>Simpan HTML</button>{/if}
       </div>
     </section>
 
