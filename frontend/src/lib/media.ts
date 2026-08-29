@@ -161,14 +161,16 @@ export async function probeCameraDevices(): Promise<CameraDevice[]> {
 type ResizeModeAttempt = "ideal" | "required" | "native";
 
 function idealCameraConstraints(profile: CameraProfile, deviceId?: string, resizeMode: ResizeModeAttempt = "ideal"): MediaTrackConstraints {
+  const portrait = profile.height > profile.width;
   const constraints = {
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     ...(!deviceId ? { facingMode: { ideal: "environment" } } : {}),
     // Do not add width/height max constraints here. Android camera HALs can
-    // reject the crop-and-scale path when both dimensions have an upper cap.
-    // The actual track dimensions and ratio are validated after opening.
+    // reject crop-and-scale when both dimensions are capped. For portrait,
+    // keep height out of the fitness-distance calculation because Android
+    // commonly reports the sensor's landscape axes (for example 2304x1728).
     width: { ideal: profile.width },
-    height: { ideal: profile.height },
+    ...(portrait ? {} : { height: { ideal: profile.height } }),
     aspectRatio: { ideal: profile.width / profile.height },
     frameRate: { ideal: profile.fps, max: profile.fps },
   } as MediaTrackConstraints & { resizeMode?: string | { ideal: string } };
@@ -318,7 +320,7 @@ function finiteNumber(value: unknown): number | null {
 const videoCandidates = [
   { key: "h264", label: "H.264", mime: "video/H264", mimes: ["video/H264"], srtCompatible: true, contentTypes: ["video/H264", "video/H264;profile-level-id=42e01f;packetization-mode=1"] },
   // Chrome's WebRTC name is H265, while some builds expose HEVC spelling.
-  { key: "h265", label: "H.265", mime: "video/H265", mimes: ["video/H265", "video/HEVC", "video/hevc"], srtCompatible: true, contentTypes: ["video/H265", "video/H265;profile-id=1;tier-flag=0;level-id=93", "video/HEVC", "video/hevc"] },
+  { key: "h265", label: "H.265", mime: "video/H265", mimes: ["video/H265", "video/HEVC", "video/hevc"], srtCompatible: true, contentTypes: ["video/H265", "video/H265; profile-id=1; tier-flag=0; level-id=93; tx-mode=SRST", "video/H265;profile-id=1;tier-flag=0;level-id=93;tx-mode=SRST", "video/HEVC", "video/hevc"] },
   { key: "av1", label: "AV1", mime: "video/AV1", mimes: ["video/AV1"], srtCompatible: false, contentTypes: [] },
   { key: "vp9", label: "VP9", mime: "video/VP9", mimes: ["video/VP9"], srtCompatible: false, contentTypes: [] },
   { key: "vp8", label: "VP8", mime: "video/VP8", mimes: ["video/VP8"], srtCompatible: false, contentTypes: [] },

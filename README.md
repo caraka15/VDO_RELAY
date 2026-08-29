@@ -1,9 +1,9 @@
 # VDO Relay
 
 VDO Relay adalah relay kamera untuk Android Chrome dan desktop Chrome.
-Browser membuka kamera dan mikrofon, memilih target output 16:9/9:16 dengan
-constraint ideal, lalu
-mengirim track melalui WHIP/WebRTC ke MediaMTX. MediaMTX tidak melakukan
+Browser membuka kamera dan mikrofon, memilih target track portrait 9:16 dengan
+constraint ideal, lalu mengirim track melalui WHIP/WebRTC ke MediaMTX. Job baru
+dikunci portrait; frame tidak diputar atau di-canvas. MediaMTX tidak melakukan
 transcoding; hasilnya dibaca OBS melalui SRT.
 
 ```text
@@ -101,36 +101,37 @@ tidak merender ulang file tersebut.
 ## Alur penggunaan
 
 1. Login dengan `admin/admin` pada instalasi baru, lalu ganti password.
-2. Pilih orientasi output yang ingin dibuat.
+2. Job baru selalu memakai portrait lock dengan target track 9:16; tidak ada
+   pilihan orientasi landscape.
 3. Tekan Deteksi. Browser meminta izin kamera dan mikrofon.
-4. Pilih kamera. Resolusi/FPS hanya menampilkan target output 16:9/9:16 yang
-   berhasil diuji dengan constraint `ideal` dan track aktif. Verifikasi menerima
-   crop browser selama rasio aktual mendekati target; ukuran native kamera hanya
+4. Pilih kamera. Resolusi/FPS hanya menampilkan target track portrait 9:16 yang
+   berhasil diuji dengan constraint `ideal` dan track aktif. Kamera 4:3 boleh
+   di-crop dan di-scale oleh pipeline browser; ukuran native kamera hanya
    ditampilkan sebagai kemampuan sensor, bukan pilihan output.
 5. Pilih codec WebRTC yang tersedia, audio Opus, bitrate maksimum, dan record.
 6. Tekan `Create stream`. Ini hanya membuat job dan URL; kamera belum live.
 7. Di halaman job, tekan `Start`. Kamera dibuka ulang, diuji lagi, lalu WHIP
    dimulai.
-8. Copy SRT URL ke OBS. URL dan token tetap sama ketika job di-stop lalu dibuka
-   kembali dari dashboard.
+8. Copy SRT URL dari tombol `OBS / SRT` di layar live atau dari Result. URL dan
+   token tetap sama ketika job di-stop lalu dibuka kembali dari dashboard.
 
 `Stop` menghentikan sesi media tetapi tidak menghapus job. `Delete` menghapus
 job dan mencabut token. Satu job memiliki maksimum 10 reader gabungan, termasuk
 OBS melalui SRT dan player browser melalui WHEP.
 
-## Kamera, codec, dan orientasi
+## Kamera dan codec
 
 Resolusi/FPS yang dipilih adalah target track yang dikirim; ukuran/FPS aktual
 diverifikasi setelah browser membuka kamera.
-Detector menguji preset target 1920×1080, 1280×720, dan 854×480 (atau pasangan
-portrait-nya) dengan `width`, `height`, dan `aspectRatio` `ideal`, serta
+Detector menguji preset portrait 1080×1920, 720×1280, dan 480×854 dengan
+`width`, `height`, dan `aspectRatio` `ideal`, serta
 `frameRate` `ideal` dengan batas `max`. Width/height tidak diberi batas `max`
 karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
 batas atas.
 Browser mencoba crop-and-scale sebagai preferensi, lalu mode wajib bila perlu,
-dan hanya menerima hasil live yang memenuhi ukuran minimum serta rasio target.
-Percobaan native terakhir hanya diterima jika kamera memang menyediakan mode
-16:9/9:16; 4:3 tidak pernah diterima sebagai fallback.
+dan hanya menerima hasil live yang memenuhi ukuran minimum serta rasio target
+9:16. Percobaan native terakhir hanya diterima jika kamera memang menyediakan
+mode 9:16; 4:3 tidak pernah diterima sebagai fallback.
 
 Semantik `resizeMode` mengikuti [MediaTrackConstraints di MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints).
 
@@ -142,12 +143,14 @@ hanya bagian kotak preview.
 
 Saat aplikasi menemukan job lama yang menyimpan ukuran 4:3, migrasi database
 mengubahnya ke 1920×1080 atau 1080×1920 sesuai orientasi job. Link stream tetap
-sama.
+sama. Job lama yang sempat dibuat sebagai portrait 1920×1080 dinormalisasi ke
+portrait 1080×1920 saat dibuka.
 
-Pada mobile, preview mengikuti bentuk aplikasi kamera: stage tetap memenuhi
-layar dan track landscape diputar dengan CSS hanya untuk tampilan. Transform
-CSS itu tidak mengubah media yang dikirim. Tombol Start/Stop, mute, Settings,
-sumber kamera, zoom, dan torch berada di kontrol live.
+Pada mobile, preview mengikuti bentuk aplikasi kamera: stage tetap portrait,
+track tidak diputar oleh CSS, dan tidak di-zoom oleh `object-fit: contain`. Jika HP
+dimiringkan, output tetap portrait; rotasi akhir dapat diatur di OBS. Tombol
+Start/Stop, mute, Settings, sumber kamera, zoom, torch, serta akses cepat
+SRT/player berada di layar live.
 
 Deteksi codec menggabungkan `RTCRtpSender.getCapabilities("video")` dengan
 `navigator.mediaCapabilities.encodingInfo()`. H.264/H.265 hanya dianggap dapat

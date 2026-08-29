@@ -73,22 +73,24 @@ Output `getUserMedia` memakai `width`, `height`, dan `aspectRatio` `ideal`, sert
 karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
 batas atas. Browser dicoba
 dengan crop-and-scale sebagai preferensi, lalu sebagai mode wajib bila perlu,
-dan terakhir tanpa resize mode untuk kamera yang memiliki mode native 16:9.
-Detector menguji target output 16:9/9:16 yang ditentukan aplikasi dan menerima
-hasil hanya selama track aktif, ukurannya tidak di bawah target, dan rasio
-`getSettings()` mendekati target. Kemampuan sensor native seperti 2304×1728
-hanya dipakai sebagai informasi dan filter; 4:3 tidak pernah menjadi fallback.
+dan terakhir tanpa resize mode untuk kamera yang memiliki mode native 9:16.
+Detector menguji target track portrait 9:16 yang ditentukan aplikasi dan
+menerima hasil hanya selama track aktif, ukurannya tidak di bawah target, dan
+rasio `getSettings()` mendekati 9:16. Kemampuan sensor native seperti
+2304×1728 hanya dipakai sebagai informasi dan filter; 4:3 tidak pernah menjadi
+fallback.
 
 Saat startup, migrasi SQLite mengubah profile job lama yang bukan 16:9/9:16 ke
 1920×1080 atau 1080×1920 berdasarkan `portrait_mode`. Path, token, dan recording
 metadata tidak berubah.
 
-Dengan demikian kamera 4:3 dapat diminta menjadi 1920×1080 tanpa canvas:
-browser/OS memotong area 4:3 dan menurunkannya ke track 16:9. Spesifikasi
+Dengan demikian kamera 4:3 dapat diminta menjadi 1080×1920 tanpa canvas:
+browser/OS memotong area 4:3 dan menurunkannya ke track 9:16. Spesifikasi
 `crop-and-scale` tidak menjamin implementasi crop tertentu berjalan di ISP
 hardware; jaminan hardware-only membutuhkan native Android Camera2/MediaCodec.
-CSS rotate di `LiveView` hanya memutar preview mobile agar track landscape dapat
-dilihat seperti aplikasi kamera; CSS tidak memengaruhi WebRTC track.
+`LiveView` tidak memutar preview dengan CSS. Stage mobile dan track encoded job
+baru tetap portrait; jika operator memiringkan HP, rotasi akhir dapat dilakukan
+di OBS.
 
 ### Codec
 

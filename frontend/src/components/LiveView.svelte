@@ -26,6 +26,7 @@
 
   let previewVideo: HTMLVideoElement;
   let settingsOpen = false;
+  let linksOpen = false;
   let audioLevel = 0;
   let muted = false;
   let torchOn = false;
@@ -33,10 +34,7 @@
   let audioMeterTimer: number | null = null;
   let lastCapture: CaptureSession | null = null;
 
-  $: outputPortrait = stream.height > stream.width;
-  $: outputOrientation = outputPortrait ? "PORTRAIT" : "LANDSCAPE";
-  $: sourceLandscape = Boolean(capture && capture.actualWidth > capture.actualHeight);
-  $: sourcePreviewAspect = capture && capture.actualHeight > 0 ? capture.actualWidth / capture.actualHeight : 16 / 9;
+  $: outputOrientation = stream.portraitMode ? "PORTRAIT" : "LANDSCAPE";
   $: selectedCamera = cameraDevices.find((device) => device.deviceId === deviceId);
   $: statusLabel = publisherStatus === "ready" ? "READY" : publisherStatus === "live" ? "LIVE" : publisherStatus === "error" ? "ERROR" : "CONNECTING";
   $: statusColor = publisherStatus === "ready" ? "var(--accent)" : publisherStatus === "live" ? "var(--success)" : publisherStatus === "error" ? "var(--danger)" : "var(--warning)";
@@ -125,7 +123,7 @@
   <div class="live-shell mx-auto w-full max-w-6xl px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
     <header class="live-header mb-5 flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div class="min-w-0"><p class="mono mb-1.5 truncate text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">STREAM / {stream.id}</p><h1 class="text-2xl font-extrabold tracking-tight sm:text-4xl">{pageTitle}</h1><p class="mt-1.5 max-w-2xl text-sm leading-6 text-[var(--muted)]">{pageDescription}</p></div>
-      <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end"><span class="inline-flex min-h-[42px] items-center gap-2 border px-3 text-xs font-extrabold" style={`border-color:${statusColor};color:${statusColor}`} aria-live="polite"><span class="status-dot" aria-hidden="true"></span>{statusLabel}</span><button class="button-secondary hidden items-center gap-2 md:inline-flex" type="button" on:click={onResult}><ExternalLink size={17} /><span>Result</span></button></div>
+      <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end"><span class="inline-flex min-h-[42px] items-center gap-2 border px-3 text-xs font-extrabold" style={`border-color:${statusColor};color:${statusColor}`} aria-live="polite"><span class="status-dot" aria-hidden="true"></span>{statusLabel}</span><button class="button-secondary hidden items-center gap-2 md:inline-flex" type="button" on:click={() => (linksOpen = !linksOpen)} aria-expanded={linksOpen} aria-controls="live-links-panel"><Radio size={17} /><span>OBS / SRT</span></button><button class="button-secondary hidden items-center gap-2 md:inline-flex" type="button" on:click={onResult}><ExternalLink size={17} /><span>Result</span></button></div>
     </header>
 
     {#if publisherError}<div class="live-error mb-4 flex gap-3 border border-[#844a52] bg-[#321c22] p-3 text-sm text-[var(--danger)]" role="alert"><AlertCircle size={19} class="mt-0.5 shrink-0" /><div><strong>Start stream bermasalah.</strong><p class="mt-1">{publisherError}</p></div></div>{/if}
@@ -134,11 +132,12 @@
       <section class="preview-panel panel overflow-hidden" aria-labelledby="preview-heading">
         <div class="preview-panel-header flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2.5 sm:px-4"><h2 id="preview-heading" class="flex min-w-0 items-center gap-2 text-sm font-extrabold"><Camera size={17} class="shrink-0 text-[var(--accent)]" /> Preview kamera</h2><span class="mono text-right text-xs font-bold text-[var(--muted)]">{stream.width} × {stream.height} / {stream.fps} FPS</span></div>
         <div class="preview-stage relative w-full bg-black">
-          <video bind:this={previewVideo} class="preview-video" class:source-landscape={sourceLandscape} style={`--source-aspect:${sourcePreviewAspect}`} autoplay muted playsinline aria-label="Preview kamera langsung"></video>
+          <video bind:this={previewVideo} class="preview-video" autoplay muted playsinline aria-label="Preview kamera langsung"></video>
           <div class="stage-status pointer-events-none absolute inset-x-3 top-3 z-10 flex items-start justify-between gap-2 sm:inset-x-4">
-            <div class="stage-status-card"><span class="inline-flex items-center gap-1.5"><span class="status-dot" style={`color:${publisherStatus === "live" ? "var(--success)" : statusColor}`}></span><span class="mono">{statusLabel}</span></span><span class="stage-status-detail">CAMERA {sourceLandscape ? "LANDSCAPE" : "PORTRAIT"} · {capture ? "ACTIVE" : "STANDBY"}</span></div>
+            <div class="stage-status-card"><span class="inline-flex items-center gap-1.5"><span class="status-dot" style={`color:${publisherStatus === "live" ? "var(--success)" : statusColor}`}></span><span class="mono">{statusLabel}</span></span><span class="stage-status-detail">CAMERA INPUT · {capture ? "ACTIVE" : "STANDBY"}</span></div>
             <div class="stage-status-card text-right"><span class="mono">{outputOrientation} · LOCKED</span><span class="stage-status-detail">MIC {audioLive ? (muted ? "MUTED" : "LIVE") : stream.audioEnabled ? "WAIT" : "OFF"}</span></div>
           </div>
+          <button class="button-secondary pointer-events-auto absolute right-3 top-[4.5rem] z-10 inline-flex min-h-[40px] items-center gap-1.5 px-2.5 text-xs font-extrabold md:hidden" type="button" on:click={() => (linksOpen = !linksOpen)} aria-expanded={linksOpen} aria-controls="live-links-panel"><Radio size={16} /><span>SRT</span></button>
           {#if publisherError}<div class="stage-error absolute inset-x-3 top-20 z-10 gap-2 border border-[#844a52] bg-[#321c22] p-3 text-xs font-bold text-[var(--danger)]" role="alert"><AlertCircle size={17} class="mt-0.5 shrink-0" /><span>{publisherError}</span></div>{/if}
           {#if !capture}<div class="no-capture-overlay absolute inset-0 flex flex-col items-center justify-center px-6 text-center"><Camera size={30} class="mb-3 text-[var(--accent)]" aria-hidden="true" /><p class="font-extrabold">Menunggu kamera</p><p class="mt-1 max-w-sm text-sm leading-6 text-[var(--muted)]">Job sudah dibuat. Tekan Start untuk membuka kamera dan mikrofon pada mode yang sudah diverifikasi.</p></div>{/if}
         </div>
@@ -149,6 +148,22 @@
       <aside class="live-sidebar space-y-4"><section class="panel p-4" aria-labelledby="stats-heading"><div class="mb-4 flex items-center gap-2 text-[var(--accent)]"><Wifi size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">TELEMETRY</span></div><h2 id="stats-heading" class="text-xl font-extrabold">Stream stats</h2><dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3"><div><dt class="text-xs font-bold uppercase tracking-[0.1em] text-[var(--faint)]">Max video</dt><dd class="mono mt-1 text-lg font-extrabold">{formatBitrate(stream.maxBitrateKbps)}</dd></div><div><dt class="text-xs font-bold uppercase tracking-[0.1em] text-[var(--faint)]">Transport</dt><dd class="mono mt-1 text-lg font-extrabold">WHIP</dd></div><div><dt class="text-xs font-bold uppercase tracking-[0.1em] text-[var(--faint)]">Diterima</dt><dd class="mono mt-1 text-lg font-extrabold">{formatBitrate(stats?.receivedBitrateKbps)}</dd></div><div><dt class="text-xs font-bold uppercase tracking-[0.1em] text-[var(--faint)]">Readers</dt><dd class="mono mt-1 text-lg font-extrabold">{stats?.srtReaders ?? 0} / 10</dd></div></dl><div class="mt-4 border-t border-[var(--border)] pt-3 text-sm text-[var(--muted)]"><p class="flex items-center justify-between gap-3"><span>Video encoder</span><strong class="mono text-[var(--text)]">{stream.codec.toUpperCase()}</strong></p><p class="mt-2 flex items-center justify-between gap-3"><span>Audio encoder</span><strong class="mono text-[var(--text)]">{stream.audioEnabled ? stream.audioCodec.toUpperCase() : "OFF"}</strong></p><p class="mt-2 flex items-center justify-between gap-3"><span>Recording</span><strong class="inline-flex items-center gap-1.5 text-[var(--text)]"><HardDrive size={15} />{(stats?.recording ?? stream.record) ? "server on" : "off"}</strong></p></div></section><section class="panel p-4" aria-labelledby="srt-heading"><div class="mb-4 flex items-center gap-2 text-[var(--accent)]"><Radio size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">OBS INPUT</span></div><h2 id="srt-heading" class="text-xl font-extrabold">SRT read URL</h2><p class="mt-1.5 text-sm leading-6 text-[var(--muted)]">URL tetap sama saat relay di-Stop dan Start ulang.</p><textarea class="field mono mt-3 min-h-[100px] w-full resize-y p-3 text-xs leading-5" readonly aria-label="SRT read URL">{stream.srtUrl || "URL belum tersedia"}</textarea><button class="button-secondary mt-2 flex w-full items-center justify-center gap-2" type="button" on:click={onCopy} disabled={!stream.srtUrl}>{#if copied}<Check size={17} class="text-[var(--success)]" /><span>Tersalin</span>{:else}<Copy size={17} /><span>Copy SRT URL</span>{/if}</button></section></aside>
     </div>
   </div>
+
+  {#if linksOpen}
+    <section id="live-links-panel" class="live-links-panel panel" aria-labelledby="live-links-heading">
+      <div class="flex items-start justify-between gap-3">
+        <div><p class="mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]">OBS / MEDIA</p><h2 id="live-links-heading" class="mt-1 text-lg font-extrabold">Link output</h2></div>
+        <button class="button-quiet min-h-[42px] px-3 text-sm" type="button" on:click={() => (linksOpen = false)} aria-label="Tutup link output"><X size={17} /></button>
+      </div>
+      <label class="mt-4 block text-sm font-bold" for="live-srt-url">SRT read URL</label>
+      <textarea id="live-srt-url" class="field mono mt-2 min-h-[92px] w-full resize-y p-3 text-xs leading-5" readonly>{stream.srtUrl || "URL belum tersedia"}</textarea>
+      <div class="mt-2 grid gap-2 sm:grid-cols-2">
+        <button class="button-secondary flex items-center justify-center gap-2" type="button" on:click={onCopy} disabled={!stream.srtUrl}>{#if copied}<Check size={17} class="text-[var(--success)]" /><span>Tersalin</span>{:else}<Copy size={17} /><span>Copy SRT</span>{/if}</button>
+        {#if stream.playerUrl}<a class="button-secondary flex items-center justify-center gap-2" href={stream.playerUrl} target="_blank" rel="noreferrer"><ExternalLink size={17} /><span>Buka player</span></a>{/if}
+      </div>
+      <p class="mt-3 text-xs leading-5 text-[var(--muted)]">URL ini tetap sama saat relay di-Stop dan Start ulang. SRT dipakai sebagai input MPEG-TS di OBS; player membuka hasil live melalui WHEP.</p>
+    </section>
+  {/if}
 
   <section class={`live-settings-panel panel ${settingsOpen ? "mobile-settings-open" : ""}`} aria-labelledby="settings-heading">
     <div class="settings-panel-header"><div><p class="mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]">CAMERA CONTROLS</p><h2 id="settings-heading" class="mt-1 flex items-center gap-2 text-lg font-extrabold"><Settings size={18} class="text-[var(--accent)]" /> Settings</h2></div><button class="button-quiet min-h-[44px] px-3 text-sm md:hidden" type="button" on:click={() => (settingsOpen = false)}>Tutup</button></div>

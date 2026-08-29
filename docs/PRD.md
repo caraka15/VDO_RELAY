@@ -40,14 +40,15 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 ### Membuat job
 
-1. Operator memilih orientasi capture: landscape atau portrait.
+1. Job baru selalu memakai portrait lock dengan track encoded 9:16; browser
+   tidak boleh melakukan rotasi/canvas.
 2. Operator menekan Deteksi dan memberi izin kamera serta mikrofon.
 3. Sistem menampilkan kamera yang ditemukan, kemampuan maksimum, zoom, dan
    torch bila dilaporkan browser.
-4. Sistem menguji kombinasi resolusi/FPS output dengan constraint `ideal` pada
-   kamera yang dipilih, termasuk aspect ratio target dan `crop-and-scale`.
+4. Sistem menguji kombinasi resolusi/FPS track dengan constraint `ideal` pada
+   kamera yang dipilih, termasuk aspect ratio 9:16 dan `crop-and-scale`.
 5. Kombinasi ditampilkan bila track live, ukurannya minimal memenuhi target, dan
-   rasio aktual mendekati target. FPS boleh sedikit lebih tinggi dari target
+   rasio aktual mendekati 9:16. FPS boleh sedikit lebih tinggi dari target
    selama tidak melewati batas max.
 6. Operator memilih codec WebRTC yang tersedia, audio Opus, max bitrate, dan
    optional recording.
@@ -59,7 +60,7 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 2. Operator menekan `Start`.
 3. Browser membuka kamera/mikrofon lagi dengan profile output ideal yang
    tersimpan.
-4. Track harus aktif dan rasio `getSettings()` harus mendekati target. Kamera
+4. Track harus aktif dan rasio `getSettings()` harus mendekati 9:16. Kamera
    4:3 boleh dipotong dan diperkecil oleh pipeline `crop-and-scale`; tidak ada
    canvas, rotate, atau fallback ukuran diam-diam.
 5. Browser membuat peer connection dan mengirim SDP WHIP ke MediaMTX.
@@ -72,13 +73,14 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 - Satu halaman tanpa scroll.
 - Preview memenuhi layar dengan stage portrait seperti aplikasi kamera.
-- Bottom navigation: mute, Start/Stop, Settings.
-- Status LIVE/READY, orientasi source, orientasi lock, dan status mikrofon
+- Bottom navigation: mute, Start/Stop, Settings. Tombol SRT berada di atas
+  stage agar link output cepat dibuka tanpa mengubah halaman.
+- Status LIVE/READY, portrait lock, dan status mikrofon
   berada di dalam stage.
-- Track landscape dapat diputar dengan CSS untuk kenyamanan melihat layar HP;
-  transform preview tidak pernah masuk ke media yang dikirim.
-- Pada desktop stage selalu landscape 16:9. Video portrait akan memiliki ruang
-  hitam di kiri/kanan hanya di preview desktop, bukan di file.
+- Track tidak diputar oleh CSS. Jika HP dimiringkan, rotasi akhir dilakukan di
+  OBS. Tombol SRT membuka URL OBS dan link player tanpa pindah halaman.
+- Pada desktop stage selalu landscape 16:9. Video portrait memakai `contain`
+  agar track tidak terpotong atau terlihat nge-zoom.
 
 ## 5. Media profile
 
@@ -86,15 +88,14 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 - Resolusi dan FPS adalah target encoded track, bukan ukuran sensor; probe hanya
   menerima track dengan ukuran minimal target dan FPS tidak di bawah target.
-- Probe hanya menawarkan target 1920×1080, 1280×720, dan 854×480 pada FPS
-  24/30/60 (serta FPS maksimum/default yang dilaporkan), atau pasangan portrait
-  9:16 ketika orientasi portrait dipilih.
+- Probe hanya menawarkan target portrait 1080×1920, 720×1280, dan 480×854 pada
+  FPS 24/30/60 (serta FPS maksimum/default yang dilaporkan).
 - Setiap target diuji dengan `width`, `height`, dan `aspectRatio` `ideal`, serta
   `frameRate` `ideal` dengan batas `max`. Width/height tidak diberi batas `max`
   karena beberapa Android HAL menolak crop-and-scale ketika dua dimensi diberi
   batas atas. Browser mencoba crop-and-scale sebagai preferensi, lalu mode wajib
   bila perlu, dan terakhir mode native; mode terakhir hanya diterima bila hasil
-  live tetap memenuhi ukuran target dan rasio.
+  live tetap memenuhi ukuran target dan rasio 9:16.
 - Kemampuan sensor native, misalnya 2304×1728, hanya ditampilkan sebagai
   informasi kamera. Kamera 4:3 dapat dipotong ke 1920×1080 jika browser
   menyetujui pipeline crop-and-scale; ukuran 4:3 tidak menjadi output job.
@@ -105,6 +106,8 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
   native Android Camera2/MediaCodec.
 - Migrasi startup mengubah profile job lama yang bukan 16:9/9:16 menjadi
   1920×1080 atau 1080×1920 sesuai `portraitMode`; path dan token tidak berubah.
+- Job lama yang sempat menyimpan portrait profile 1920×1080 dinormalisasi ke
+  1080×1920 saat dibuka; job baru langsung menyimpan track portrait.
 - Nilai bitrate di UI adalah batas maksimum encoder WebRTC.
 - WebRTC boleh mengirim bitrate aktual lebih rendah karena scene atau network;
   aplikasi tidak menjalankan adaptive controller buatan sendiri.
