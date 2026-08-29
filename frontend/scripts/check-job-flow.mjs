@@ -45,7 +45,9 @@ assert.match(media, /device\.maxWidth/, "Camera probe must test dimensions repor
 assert.match(media, /width: \{ ideal: profile\.width \}/, "Camera width must use an ideal target");
 assert.match(media, /height: \{ ideal: profile\.height \}/, "Camera height must use an ideal target");
 assert.match(media, /aspectRatio: \{ ideal: profile\.width \/ profile\.height \}/, "Camera aspect ratio must use an ideal target");
-assert.match(media, /const portrait = profile\.height > profile\.width/, "Camera constraints must recognize portrait profiles");
+assert.match(media, /const targetPortrait = profile\.height > profile\.width/, "Camera verification must recognize portrait profiles");
+assert.match(media, /height: \{ ideal: profile\.height \}/, "Portrait camera constraints must include the target height");
+assert.doesNotMatch(media, /portrait \? \{\} : \{ height:/, "Portrait camera constraints must not drop the target height");
 assert.match(media, /const width = portrait \? resolution\.height/, "Portrait probes must request portrait dimensions");
 assert.match(media, /resizeMode = "crop-and-scale"/, "Camera output must force browser crop-and-scale");
 assert.match(media, /applyIdealCameraProfile/, "Camera output must apply the target profile after opening the track");
@@ -70,7 +72,7 @@ assert.match(media, /DEVICE_CHECK_RESOLUTIONS/, "Device diagnostics must probe m
 assert.match(media, /DEVICE_CHECK_RATIOS/, "Device diagnostics must probe multiple aspect ratios");
 assert.match(deviceCheck, /EncodingInfo probe/, "Device diagnostics must show codec encoding probes");
 assert.match(deviceCheck, /Range capability/, "Device diagnostics must show camera capability ranges");
-assert.match(deviceCheck, /Uji rasio tanpa menentukan resolusi/, "Device diagnostics must separate ratio-only probes");
+assert.match(deviceCheck, /Uji rasio dengan pasangan dimensi/, "Device diagnostics must show ratio probes with orientation dimensions");
 assert.match(deviceCheck, /Audio input terdaftar/, "Device diagnostics must show microphone inputs");
 assert.match(deviceCheck, /JSON\.stringify\(report, null, 2\)/, "Device diagnostics JSON export must keep the complete report");
 assert.match(deviceCheck, /downloadReport\(html, .*\.html/, "Device diagnostics must export a complete HTML report");

@@ -175,11 +175,11 @@ export const CAMERA_RESOLUTIONS = [
 export const CAMERA_FPS_OPTIONS = [24, 30, 60] as const;
 
 export const DEVICE_CHECK_RESOLUTIONS = [
-  { label: "4K UHD", width: 3840, height: 2160 },
-  { label: "1440p", width: 2560, height: 1440 },
-  { label: "1080p", width: 1920, height: 1080 },
-  { label: "720p", width: 1280, height: 720 },
-  { label: "480p", width: 854, height: 480 },
+  { label: "4K UHD portrait", width: 2160, height: 3840 },
+  { label: "1440p portrait", width: 1440, height: 2560 },
+  { label: "1080p portrait", width: 1080, height: 1920 },
+  { label: "720p portrait", width: 720, height: 1280 },
+  { label: "480p portrait", width: 480, height: 854 },
 ] as const;
 
 export const DEVICE_CHECK_RATIOS = [
@@ -303,16 +303,14 @@ export async function probeCameraDevices(): Promise<CameraDevice[]> {
 type ResizeModeAttempt = "ideal" | "required" | "native";
 
 function idealCameraConstraints(profile: CameraProfile, deviceId?: string, resizeMode: ResizeModeAttempt = "ideal"): MediaTrackConstraints {
-  const portrait = profile.height > profile.width;
   const constraints = {
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     ...(!deviceId ? { facingMode: { ideal: "environment" } } : {}),
     // Do not add width/height max constraints here. Android camera HALs can
-    // reject crop-and-scale when both dimensions are capped. For portrait,
-    // keep height out of the fitness-distance calculation because Android
-    // commonly reports the sensor's landscape axes (for example 2304x1728).
+    // reject crop-and-scale when both dimensions are capped. Both target axes
+    // stay ideal: Android needs the portrait pair to choose a portrait track.
     width: { ideal: profile.width },
-    ...(portrait ? {} : { height: { ideal: profile.height } }),
+    height: { ideal: profile.height },
     aspectRatio: { ideal: profile.width / profile.height },
     frameRate: { ideal: profile.fps, max: profile.fps },
   } as MediaTrackConstraints & { resizeMode?: string | { ideal: string } };
@@ -347,6 +345,8 @@ function profileMatches(track: MediaStreamTrack | undefined, settings: MediaTrac
   const width = finiteNumber(settings?.width) || 0;
   const height = finiteNumber(settings?.height) || 0;
   const fps = finiteNumber(settings?.frameRate) || 0;
+  const targetPortrait = profile.height > profile.width;
+  const actualPortrait = height > width;
   const ratioMatches = width > 0 && height > 0
     ? isAspectRatioClose(width, height, profile.width / profile.height)
     : isRatioClose(settingsAspectRatio(settings), profile.width / profile.height);
@@ -354,6 +354,7 @@ function profileMatches(track: MediaStreamTrack | undefined, settings: MediaTrac
     track?.readyState === "live"
       && width >= profile.width
       && height >= profile.height
+      && targetPortrait === actualPortrait
       && ratioMatches
       && fps + 1 >= profile.fps,
   );
@@ -387,6 +388,7 @@ async function requestCameraProfile(
         return { stream, track, settings };
       }
       lastError = new Error("Kamera tidak menghasilkan target output yang diminta.");
+      continue;
     } catch (error) {
       lastError = error;
       if (!canRetryCameraProfile(error)) throw error;
@@ -425,31 +427,19 @@ export async function probeCameraProfiles(deviceId: string | undefined, portrait
     if (!supported.some((item) => item.width === profile.width && item.height === profile.height && item.fps === profile.fps)) supported.push(profile);
   };
 
-  let stream: MediaStream | null = null;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), facingMode: { ideal: "environment" } },
-      audio: false,
-    });
-    const track = stream.getVideoTracks()[0];
-    if (!track) return supported;
-    for (const profile of candidates) {
-      for (const resizeMode of ["ideal", "required", "native"] as const) {
-        try {
-          await applyIdealCameraProfile(track, profile, resizeMode);
-          if (profileMatches(track, track.getSettings(), profile)) {
-            addSupported(profile);
-            break;
-          }
-        } catch (error) {
-          if (!canRetryCameraProfile(error)) break;
-        }
-      }
+  // Probe each profile with a fresh track so Android cannot retain the
+  // previous track's orientation after applyConstraints().
+  for (const profile of candidates) {
+    let stream: MediaStream | null = null;
+    try {
+      const result = await requestCameraProfile(profile, deviceId, false);
+      stream = result.stream;
+      addSupported(profile);
+    } catch {
+      // Unsupported profile; keep checking the other portrait profiles.
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
     }
-  } catch {
-    // Permission and device errors are surfaced by the initial device probe.
-  } finally {
-    stream?.getTracks().forEach((track) => track.stop());
   }
 
   return supported;
@@ -726,10 +716,18 @@ function resolutionCheckStatus(actual: TrackSnapshot, width: number, height: num
   return "fallback";
 }
 
+function ratioProbeDimensions(targetRatio: number): { width: number; height: number } {
+  const width = targetRatio < 1 ? 720 : targetRatio > 1 ? 1280 : 720;
+  return { width, height: Math.round(width / targetRatio) };
+}
+
 async function checkCameraRatio(deviceId: string, label: string, targetRatio: number): Promise<CameraRatioCheck> {
   let stream: MediaStream | null = null;
   try {
+    const target = ratioProbeDimensions(targetRatio);
     const opened = await openDiagnosticCamera(deviceId, {
+      width: { ideal: target.width },
+      height: { ideal: target.height },
       aspectRatio: { ideal: targetRatio },
       resizeMode: { ideal: "crop-and-scale" } as any,
     } as any);

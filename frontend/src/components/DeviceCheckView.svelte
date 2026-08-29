@@ -334,7 +334,7 @@
                 </div>
 
                 <div class="mt-6 border-t border-[var(--border)] pt-5">
-                  <h4 class="text-sm font-extrabold">Uji rasio tanpa menentukan resolusi</h4>
+                  <h4 class="text-sm font-extrabold">Uji rasio dengan pasangan dimensi</h4>
                   <div class="mt-3 grid gap-2 sm:grid-cols-3">{#each camera.ratioChecks as probe: CameraRatioCheck}<div class="border border-[var(--border)] p-3"><div class="flex items-start justify-between gap-2"><p class="font-bold">{probe.label}</p><span class="shrink-0 border px-2 py-0.5 text-[0.6875rem] font-extrabold {resultClass(probe.status)}">{resultLabel(probe.status)}</span></div><p class="mono mt-2 text-xs font-bold">{trackSize(probe.actual)} / {trackFps(probe.actual)}</p><p class="mt-1 text-xs text-[var(--muted)]">actual ratio: {formatRatio(probe.actual?.aspectRatio || 0)}</p>{#if probe.error}<p class="mt-2 break-words text-xs text-[var(--danger)]">{probe.error}</p>{/if}</div>{:else}<p class="text-sm text-[var(--muted)]">Uji rasio belum tersedia.</p>{/each}</div>
                 </div>
 
