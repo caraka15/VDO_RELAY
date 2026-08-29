@@ -41,7 +41,7 @@
   $: statusLabel = publisherStatus === "ready" ? "READY" : publisherStatus === "live" ? "LIVE" : publisherStatus === "error" ? "ERROR" : "CONNECTING";
   $: statusColor = publisherStatus === "ready" ? "var(--accent)" : publisherStatus === "live" ? "var(--success)" : publisherStatus === "error" ? "var(--danger)" : "var(--warning)";
   $: pageTitle = publisherStatus === "ready" ? "Job siap" : publisherStatus === "live" ? "Output sedang berjalan" : publisherStatus === "error" ? "Start belum berhasil" : "Menyiapkan output";
-  $: pageDescription = publisherStatus === "ready" || publisherStatus === "error" ? "Tekan Start untuk membuka kamera dan mengirim track output exact melalui WHIP." : "Preview mengikuti kamera langsung. Orientasi, resolusi, dan FPS tetap terkunci.";
+  $: pageDescription = publisherStatus === "ready" || publisherStatus === "error" ? "Tekan Start untuk membuka kamera dan mengirim track target melalui WHIP." : "Preview mengikuti kamera langsung. Orientasi, resolusi, dan FPS tetap terkunci.";
   $: videoCapabilities = capture?.videoTrack?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean; zoom?: { min?: number; max?: number; step?: number } }) | undefined;
   $: torchSupported = videoCapabilities?.torch === true;
   $: zoomCapability = videoCapabilities?.zoom;

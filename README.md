@@ -1,7 +1,8 @@
 # VDO Relay
 
 VDO Relay adalah relay kamera untuk Android Chrome dan desktop Chrome.
-Browser membuka kamera dan mikrofon, memilih output exact 16:9/9:16, lalu
+Browser membuka kamera dan mikrofon, memilih target output 16:9/9:16 dengan
+constraint ideal, lalu
 mengirim track melalui WHIP/WebRTC ke MediaMTX. MediaMTX tidak melakukan
 transcoding; hasilnya dibaca OBS melalui SRT.
 
@@ -103,8 +104,9 @@ tidak merender ulang file tersebut.
 2. Pilih orientasi output yang ingin dibuat.
 3. Tekan Deteksi. Browser meminta izin kamera dan mikrofon.
 4. Pilih kamera. Resolusi/FPS hanya menampilkan target output 16:9/9:16 yang
-   berhasil diuji dengan constraint `exact` dan `getSettings()`. Ukuran native
-   kamera hanya ditampilkan sebagai kemampuan sensor, bukan pilihan output.
+   berhasil diuji dengan constraint `ideal` dan track aktif. Verifikasi menerima
+   crop browser selama rasio aktual mendekati target; ukuran native kamera hanya
+   ditampilkan sebagai kemampuan sensor, bukan pilihan output.
 5. Pilih codec WebRTC yang tersedia, audio Opus, bitrate maksimum, dan record.
 6. Tekan `Create stream`. Ini hanya membuat job dan URL; kamera belum live.
 7. Di halaman job, tekan `Start`. Kamera dibuka ulang, diuji lagi, lalu WHIP
@@ -118,12 +120,13 @@ OBS melalui SRT dan player browser melalui WHEP.
 
 ## Kamera, codec, dan orientasi
 
-Resolusi/FPS yang dipilih adalah ukuran dan FPS final track yang dikirim.
-Detector menguji preset output 1920×1080, 1280×720, dan 854×480 (atau pasangan
-portrait-nya) dengan `width`, `height`, `aspectRatio`, `frameRate`, dan
-`resizeMode: crop-and-scale` yang exact. Jadi sensor 2304×1728 (4:3), misalnya,
-tetap dapat menghasilkan output 1920×1080 (16:9) jika Chrome menyetujuinya;
-ukuran 2304×1728 tidak dimasukkan sebagai output final.
+Resolusi/FPS yang dipilih adalah target track yang dikirim; ukuran/FPS aktual
+ditentukan browser sesuai kemampuan kamera.
+Detector menguji preset target 1920×1080, 1280×720, dan 854×480 (atau pasangan
+portrait-nya) dengan `width`, `height`, dan `aspectRatio` `ideal`, serta
+`frameRate` `ideal` dengan batas `max` dan `resizeMode: crop-and-scale` `ideal`.
+Target dianggap valid bila track aktif dan rasio aktual mendekati target; ukuran
+sensor 2304×1728 (4:3) tidak otomatis menjadi output final.
 
 Semantik `resizeMode` mengikuti [MediaTrackConstraints di MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints).
 
@@ -142,13 +145,14 @@ layar dan track landscape diputar dengan CSS hanya untuk tampilan. Transform
 CSS itu tidak mengubah media yang dikirim. Tombol Start/Stop, mute, Settings,
 sumber kamera, zoom, dan torch berada di kontrol live.
 
-Deteksi codec menggunakan daftar codec yang tersedia di WebRTC browser. Browser
-tidak menyediakan API yang dapat membuktikan bahwa codec pasti memakai hardware
-encoder; `RTCRtpSender` capability bukan bukti hardware-only. Jika hardware
-encoder wajib dijamin, diperlukan aplikasi native Android dengan Camera2 dan
-MediaCodec. Untuk output SRT v1, hanya H.264 dan H.265 yang dapat dipilih.
-VP8/VP9/AV1 boleh terlihat pada capability browser, tetapi tidak dipakai untuk
-job SRT ini. H.265 di Chrome memiliki batasan dukungan perangkat/browser.
+Deteksi codec menggabungkan `RTCRtpSender.getCapabilities("video")` dengan
+`navigator.mediaCapabilities.encodingInfo()`. H.264/H.265 hanya dianggap dapat
+dipilih bila browser melaporkan `supported` dan `powerEfficient`; publisher lalu
+mengunci codec tersebut dengan `setCodecPreferences`, sehingga VP8/VP9/AV1
+tidak menjadi fallback. `powerEfficient` adalah sinyal kemampuan dari browser,
+bukan jaminan absolut implementasi hardware; jaminan hardware-only tetap
+memerlukan aplikasi native Android dengan Camera2 dan MediaCodec. H.265 di
+Chrome memiliki batasan dukungan perangkat/browser.
 
 Audio browser memakai Opus melalui WebRTC. MediaMTX merelay track tanpa
 transcoding menuju SRT.
@@ -209,7 +213,7 @@ halaman HTTP biasa selain pengecualian localhost tertentu.
 cmd/vdo/                         entrypoint Go
 internal/app/                    API, SQLite, auth, lifecycle MediaMTX
 frontend/src/App.svelte          routing dashboard/setup/live/result/player
-frontend/src/lib/media.ts        capability dan exact output capture
+frontend/src/lib/media.ts        capability dan ideal output capture
 frontend/src/lib/mediamtx-webrtc-publisher.js  WHIP publisher
 frontend/src/lib/mediamtx-webrtc-reader.js     WHEP player
 deploy/nginx/vdo-relay.conf      vhost port 80 sebelum Certbot

@@ -6,7 +6,7 @@
 ┌─────────────────────────────┐
 │ Android/Desktop Chrome      │
 │ getUserMedia                 │
-│ exact output track + crop    │
+│ ideal output track + crop    │
 │ and scale + Opus             │
 │ RTCPeerConnection / WHIP     │
 └──────────────┬──────────────┘
@@ -55,7 +55,7 @@ src/App.svelte
 
 src/lib/media.ts
   ├─ permission + device enumeration
-  ├─ exact output profile probe
+  ├─ ideal output profile probe
   ├─ WebRTC capability probe
   └─ getUserMedia capture
 
@@ -68,10 +68,10 @@ src/lib/mediamtx-webrtc-reader.js
 
 ### Capture semantics
 
-Output `getUserMedia` memakai `width`, `height`, `aspectRatio`, dan `frameRate`
-`exact` dengan `resizeMode: crop-and-scale`. Detector hanya menguji target
-output 16:9/9:16 yang ditentukan aplikasi, lalu membuang hasil jika
-`getSettings()` tidak mengembalikan ukuran atau FPS yang diminta. Kemampuan
+Output `getUserMedia` memakai `width`, `height`, dan `aspectRatio` `ideal`, serta
+`frameRate` `ideal` dengan batas `max` dan `resizeMode: crop-and-scale` `ideal`.
+Detector menguji target output 16:9/9:16 yang ditentukan aplikasi dan menerima
+hasil selama track aktif serta rasio `getSettings()` mendekati target. Kemampuan
 sensor native seperti 2304×1728 hanya dipakai sebagai informasi dan filter;
 tidak pernah otomatis menjadi ukuran output job.
 
@@ -88,11 +88,13 @@ dilihat seperti aplikasi kamera; CSS tidak memengaruhi WebRTC track.
 
 ### Codec
 
-Capability diperoleh dari `RTCRtpSender.getCapabilities("video")`, lalu
-publisher memakai `RTCRtpTransceiver.setCodecPreferences()` untuk codec pilihan.
-Hasil capability adalah kemampuan WebRTC browser, bukan bukti hardware encoder.
-Web API tidak menyediakan verifikasi hardware-only yang dapat diandalkan.
-Jaminan hardware harus dipindahkan ke native Android Camera2/MediaCodec.
+Capability diperoleh dari `RTCRtpSender.getCapabilities("video")` dan
+`navigator.mediaCapabilities.encodingInfo()`. H.264/H.265 hanya lolos bila
+terdaftar di capability RTP serta menghasilkan `supported: true` dan
+`powerEfficient: true`. Publisher memakai `RTCRtpTransceiver.setCodecPreferences()`
+untuk mengunci codec yang dipilih, sehingga VP8/VP9/AV1 tidak menjadi fallback.
+`powerEfficient` adalah sinyal browser, bukan bukti absolut implementasi hardware;
+jaminan hardware-only tetap memerlukan native Android Camera2/MediaCodec.
 
 H.264 dan H.265 dipilih untuk output SRT. VP8, VP9, dan AV1 dapat diketahui
 sebagai capability WebRTC, tetapi tidak menjadi pilihan job SRT v1 karena
@@ -293,10 +295,13 @@ berjalan sebagai UID/GID 10001.
 
 ## 10. Bitrate dan stats
 
-UI mengirim `maxBitrateKbps`. Publisher menerapkan `RTCRtpEncodingParameters.maxBitrate`
-sebagai cap. WebRTC boleh memilih bitrate aktual di bawah cap karena congestion
-control, scene, atau codec. Tidak ada controller yang menurunkan target setiap
-beberapa detik dan tidak ada floor buatan.
+UI mengirim `maxBitrateKbps`. Publisher menerapkan
+`RTCRtpSender.setParameters()` pada encoding pertama dan mengisi
+`RTCRtpEncodingParameters.maxBitrate` sebagai cap. Fungsi ini dapat dipanggil
+lagi saat peer connection hidup tanpa restart. WebRTC boleh memilih bitrate
+aktual di bawah cap karena congestion control, scene, atau codec. Tidak ada
+controller yang menurunkan target setiap beberapa detik dan tidak ada floor
+buatan.
 
 Backend menghitung `receivedBitrateKbps` dari delta `inboundBytes` MediaMTX
 antar polling. Angka ini adalah estimasi data yang masuk ke MediaMTX, bukan

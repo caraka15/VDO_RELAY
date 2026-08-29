@@ -177,10 +177,10 @@ class MediaMTXWebRTCPublisher {
       });
       const codecName = this.#codecMime(track.kind, track.kind === "video" ? this.#conf.videoCodec : this.#conf.audioCodec);
       const capabilities = RTCRtpSender.getCapabilities?.(track.kind)?.codecs || [];
-      const codecs = capabilities.filter((codec) => String(codec.mimeType).toLowerCase() === codecName.toLowerCase());
-      if (codecs.length === 0) throw new Error(`WebRTC tidak menyediakan codec ${codecName}`);
+      const matchedCodecs = capabilities.filter((codec) => String(codec.mimeType).toLowerCase() === codecName.toLowerCase());
+      if (matchedCodecs.length === 0) throw new Error(`WebRTC tidak menyediakan codec ${codecName}`);
       if (!transceiver.setCodecPreferences) throw new Error("Browser tidak mendukung pemilihan codec WebRTC");
-      transceiver.setCodecPreferences(codecs);
+      transceiver.setCodecPreferences(matchedCodecs);
       if (track.kind === "video") this.#videoSender = transceiver.sender;
     }
 
@@ -249,11 +249,10 @@ class MediaMTXWebRTCPublisher {
   async #applyVideoParameters() {
     if (this.#videoSender === null) return;
     const parameters = this.#videoSender.getParameters();
-    if (!parameters.encodings?.length) return;
-    for (const encoding of parameters.encodings) {
-      encoding.maxBitrate = Math.round(this.#conf.videoBitrate * 1000);
-      encoding.maxFramerate = this.#conf.videoFramerate;
-    }
+    if (!parameters.encodings) parameters.encodings = [{}];
+    if (parameters.encodings.length === 0) parameters.encodings.push({});
+    parameters.encodings[0].maxBitrate = Math.round(this.#conf.videoBitrate * 1000);
+    parameters.encodings[0].maxFramerate = this.#conf.videoFramerate;
     await this.#videoSender.setParameters(parameters);
   }
 

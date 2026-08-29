@@ -93,7 +93,7 @@
       const profiles = await probeCameraProfiles(deviceId, portrait, device);
       if (sequence !== profileProbeSequence || key !== profileProbeKey) return;
       cameraProfiles = profiles;
-      if (profiles.length === 0) profileError = "Kamera tidak menyetujui output crop-and-scale exact yang diuji. Pilih sumber kamera lain atau ubah orientasi.";
+      if (profiles.length === 0) profileError = "Kamera tidak menghasilkan track aktif dengan rasio target yang diminta. Pilih sumber kamera lain atau ubah orientasi.";
     } catch (probeError) {
       if (sequence === profileProbeSequence && key === profileProbeKey) profileError = probeError instanceof Error ? probeError.message : "Mode kamera belum bisa diperiksa.";
     } finally {
@@ -163,7 +163,7 @@
     <div>
       <p class="mono mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">NEW JOB / CAMERA MODE</p>
       <h1 class="text-3xl font-extrabold tracking-tight sm:text-4xl">Buat job stream</h1>
-      <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilih orientasi dan output final lebih dulu. Kamera 4:3 dapat dipotong ke target 16:9 oleh pipeline capture browser; tidak ada canvas atau fallback ukuran diam-diam.</p>
+      <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilih orientasi dan output target lebih dulu. Browser meminta kamera memilih rasio target dengan crop-and-scale bila tersedia; tidak ada canvas atau fallback ukuran diam-diam.</p>
     </div>
     <button class="button-quiet flex items-center gap-2" type="button" on:click={onBack}>Dashboard</button>
   </header>
@@ -175,7 +175,7 @@
   <section class="panel mb-5 p-5 sm:p-6" aria-labelledby="orientation-heading">
     <div class="mb-4 flex items-center gap-2 text-[var(--accent)]"><Video size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">STEP 01 / ORIENTATION</span></div>
     <h2 id="orientation-heading" class="text-xl font-extrabold">Orientasi frame kamera</h2>
-    <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilihan ini menentukan arah output: landscape 16:9 atau portrait 9:16. Kamera tetap dibuka sebagai track exact; tidak ada canvas atau rotate tambahan.</p>
+    <p class="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Pilihan ini menentukan rasio target: landscape 16:9 atau portrait 9:16. Kamera dibuka sebagai track langsung; tidak ada canvas atau rotate tambahan.</p>
     <div class="mt-5 grid gap-3 sm:grid-cols-2">
       <label class="flex min-h-[78px] cursor-pointer items-center gap-3 border p-4" class:border-[var(--accent)]={outputOrientation === "landscape"} class:bg-[var(--surface-strong)]={outputOrientation === "landscape"} class:border-[var(--border)]={outputOrientation !== "landscape"}>
         <input class="sr-only" type="radio" name="output-orientation" value="landscape" bind:group={outputOrientation} />
@@ -192,14 +192,14 @@
     <section class="panel p-5 sm:p-6" aria-labelledby="output-heading">
       <div class="mb-5 flex items-center gap-2 text-[var(--accent)]"><ShieldCheck size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">STEP 02 / PROFILE</span></div>
       <h2 id="output-heading" class="text-xl font-extrabold">Codec dan mode final</h2>
-      <p class="mt-2 max-w-xl text-sm leading-6 text-[var(--muted)]">Resolusi dan FPS di sini adalah ukuran track final yang diminta. Jika sensor kamera 4:3, misalnya 2304 × 1728, browser diminta crop-and-scale ke output 16:9/9:16 tanpa canvas.</p>
+      <p class="mt-2 max-w-xl text-sm leading-6 text-[var(--muted)]">Resolusi dan FPS di sini adalah target track final. Jika sensor kamera 4:3, browser diminta crop-and-scale ke rasio 16:9/9:16 tanpa canvas; ukuran aktual dapat mengikuti kemampuan perangkat.</p>
 
       <div class="mt-5 grid grid-cols-2 gap-3">
-        <button class="min-h-[74px] border p-3 text-left transition-colors" class:border-[var(--accent)]={selectedCodec === "h264"} class:bg-[var(--surface-strong)]={selectedCodec === "h264"} class:border-[var(--border)]={selectedCodec !== "h264"} type="button" on:click={() => chooseCodec("h264")} disabled={!h264?.supported}><span class="mono block text-sm font-extrabold">H.264</span><span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h264?.supported} class:text-[var(--faint)]={!h264?.supported}>{h264?.supported ? "terdeteksi · SRT" : "tidak terdeteksi"}</span></button>
-        <button class="min-h-[74px] border p-3 text-left transition-colors" class:border-[var(--accent)]={selectedCodec === "h265"} class:bg-[var(--surface-strong)]={selectedCodec === "h265"} class:border-[var(--border)]={selectedCodec !== "h265"} type="button" on:click={() => chooseCodec("h265")} disabled={!h265?.supported}><span class="mono block text-sm font-extrabold">H.265</span><span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h265?.supported} class:text-[var(--faint)]={!h265?.supported}>{h265?.supported ? "terdeteksi · SRT" : "tidak terdeteksi"}</span></button>
+        <button class="min-h-[74px] border p-3 text-left transition-colors" class:border-[var(--accent)]={selectedCodec === "h264"} class:bg-[var(--surface-strong)]={selectedCodec === "h264"} class:border-[var(--border)]={selectedCodec !== "h264"} type="button" on:click={() => chooseCodec("h264")} disabled={!h264?.supported}><span class="mono block text-sm font-extrabold">H.264</span><span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h264?.supported} class:text-[var(--faint)]={!h264?.supported}>{h264?.supported ? "hardware · SRT" : "tidak tersedia hardware"}</span></button>
+        <button class="min-h-[74px] border p-3 text-left transition-colors" class:border-[var(--accent)]={selectedCodec === "h265"} class:bg-[var(--surface-strong)]={selectedCodec === "h265"} class:border-[var(--border)]={selectedCodec !== "h265"} type="button" on:click={() => chooseCodec("h265")} disabled={!h265?.supported}><span class="mono block text-sm font-extrabold">H.265</span><span class="mt-1 block text-xs font-semibold" class:text-[var(--success)]={h265?.supported} class:text-[var(--faint)]={!h265?.supported}>{h265?.supported ? "hardware · SRT" : "tidak tersedia hardware"}</span></button>
       </div>
 
-      <p class="mt-3 text-xs font-semibold leading-5 text-[var(--faint)]">Capability WebRTC lain: {codecs.filter((codec) => !codec.srtCompatible).map((codec) => `${codec.label} ${codec.supported ? "tersedia" : "tidak tersedia"}`).join(" Â· ") || "belum dibaca"}. V1 SRT memakai H.264 atau H.265.</p>
+      <p class="mt-3 text-xs font-semibold leading-5 text-[var(--faint)]">Codec WebRTC lain: {codecs.filter((codec) => !codec.srtCompatible).map((codec) => `${codec.label} tidak dipakai`).join(" Â· ") || "belum dibaca"}. V1 hanya mengunci H.264 atau H.265 yang terdeteksi efisien daya.</p>
 
       <div class="mt-5 grid gap-4 sm:grid-cols-2">
         <div><label for="resolution" class="mb-2 block text-sm font-bold">Resolusi output</label><select id="resolution" class="field w-full px-3" bind:value={resolutionKey} disabled={profileChecking || availableResolutions.length === 0}>{#if availableResolutions.length === 0}<option value="">{profileChecking ? "Memeriksa kamera..." : "Tidak ada output terbukti"}</option>{/if}{#each availableResolutions as option}<option value={resolutionValue(option)}>{resolutionValue(option)} · {option.label}</option>{/each}</select></div>
@@ -207,16 +207,16 @@
       </div>
 
       <div class="mt-4 border border-[var(--border)] bg-[var(--surface-raised)] p-4">
-        <div class="flex items-start gap-3 text-sm font-extrabold"><Camera size={17} class="mt-0.5 shrink-0 text-[var(--accent)]" /><div><p>Output terverifikasi: {outputWidth ? `${outputWidth} × ${outputHeight} · ${fps} FPS` : "belum ada"}</p><p class="mt-1 text-xs font-semibold text-[var(--muted)]">Ukuran track tetap exact. Kamera 4:3 dipotong oleh crop-and-scale browser; tidak ada canvas atau transcoding server.</p></div></div>
+        <div class="flex items-start gap-3 text-sm font-extrabold"><Camera size={17} class="mt-0.5 shrink-0 text-[var(--accent)]" /><div><p>Target output: {outputWidth ? `${outputWidth} × ${outputHeight} · ${fps} FPS` : "belum ada"}</p><p class="mt-1 text-xs font-semibold text-[var(--muted)]">Track memakai target ideal. Kamera 4:3 boleh dipotong oleh crop-and-scale browser; tidak ada canvas atau transcoding server.</p></div></div>
         <div class="mt-3 flex items-start gap-2 border-t border-[var(--border)] pt-3 text-xs font-bold" aria-live="polite">
-          {#if profileChecking}<Activity size={15} class="mt-0.5 shrink-0 animate-pulse text-[var(--warning)]" /><span class="text-[var(--warning)]">Menguji kombinasi kamera exact...</span>
-          {:else if profileSupported}<Check size={15} class="mt-0.5 shrink-0 text-[var(--success)]" /><span class="text-[var(--success)]">Output ini terbukti tersedia dengan crop-and-scale.</span>
+          {#if profileChecking}<Activity size={15} class="mt-0.5 shrink-0 animate-pulse text-[var(--warning)]" /><span class="text-[var(--warning)]">Menguji kombinasi kamera...</span>
+          {:else if profileSupported}<Check size={15} class="mt-0.5 shrink-0 text-[var(--success)]" /><span class="text-[var(--success)]">Track aktif dan rasio output mendekati target.</span>
           {:else}<X size={15} class="mt-0.5 shrink-0 text-[var(--danger)]" /><span class="text-[var(--danger)]">Output ini belum terbukti. Pilih opsi lain.</span>{/if}
         </div>
         {#if profileError}<p class="mt-3 border border-[#844a52] bg-[#321c22] p-3 text-xs font-semibold leading-5 text-[var(--danger)]" role="alert">{profileError}</p>{/if}
         <div class="mt-3 flex items-start gap-2 border-t border-[var(--border)] pt-3 text-xs font-bold" aria-live="polite">
           {#if outputChecking}<Activity size={15} class="mt-0.5 shrink-0 animate-pulse text-[var(--warning)]" /><span class="text-[var(--warning)]">Memeriksa encoder {selectedCodec.toUpperCase()}...</span>
-          {:else if outputSupported}<Check size={15} class="mt-0.5 shrink-0 text-[var(--success)]" /><span class="text-[var(--success)]">Codec ini tersedia untuk WHIP dan output SRT.</span>
+          {:else if outputSupported}<Check size={15} class="mt-0.5 shrink-0 text-[var(--success)]" /><span class="text-[var(--success)]">Codec hardware ini tersedia untuk WHIP dan output SRT.</span>
           {:else}<X size={15} class="mt-0.5 shrink-0 text-[var(--danger)]" /><span class="text-[var(--danger)]">Codec ini tidak tersedia di browser.</span>{/if}
         </div>
       </div>
@@ -229,7 +229,7 @@
         <div class="mb-4 flex items-center justify-between gap-3"><div class="flex items-center gap-2 text-[var(--accent)]"><Camera size={18} /><span class="mono text-xs font-bold uppercase tracking-[0.14em]">INPUT CHECK</span></div><button class="button-secondary inline-flex shrink-0 items-center gap-2" type="button" on:click={onDetect} disabled={detecting}><RefreshCw size={16} class={detecting ? "animate-spin" : ""} /><span class="hidden sm:inline">{detecting ? "Membaca..." : "Deteksi"}</span></button></div>
         <h2 id="camera-heading" class="text-xl font-extrabold">Kamera</h2>
         {#if devices.length === 0}<p class="mt-3 flex gap-2 border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs font-semibold leading-5 text-[var(--muted)]"><CircleHelp size={16} class="mt-0.5 shrink-0 text-[var(--warning)]" />Tekan Deteksi dan izinkan kamera untuk menguji resolusi/FPS.</p>{:else}<label for="setup-camera" class="mt-4 block text-sm font-bold">Sumber kamera</label><select id="setup-camera" class="field mt-2 w-full px-3" bind:value={selectedDeviceId} disabled={detecting || profileChecking}>{#each devices as device}<option value={device.deviceId}>{device.label}</option>{/each}</select>{#if selectedDevice}<p class="mono mt-2 text-[11px] font-semibold leading-5 text-[var(--muted)]">{cameraSummary(selectedDevice)}</p>{/if}{/if}
-        <p class="mt-4 border-t border-[var(--border)] pt-4 text-xs font-semibold leading-5 text-[var(--muted)]">Daftar resolusi/FPS di sebelah kiri adalah output exact yang diuji. Angka max di atas adalah kemampuan sensor/kamera, bukan ukuran file final.</p>
+        <p class="mt-4 border-t border-[var(--border)] pt-4 text-xs font-semibold leading-5 text-[var(--muted)]">Daftar resolusi/FPS di sebelah kiri adalah target yang diuji dengan constraint ideal. Angka max di atas adalah kemampuan sensor/kamera, bukan ukuran file final.</p>
       </section>
 
       <section class="panel p-5" aria-labelledby="audio-heading">

@@ -11,7 +11,7 @@ dan mengeluarkan SRT. Server tidak mentranscode video.
 
 ```text
 getUserMedia
-  -> MediaStream track output exact (crop-and-scale bila perlu)
+  -> MediaStream track output target (crop-and-scale bila perlu)
   -> WebRTC / WHIP
   -> MediaMTX
   -> SRT read / OBS
@@ -44,9 +44,10 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 2. Operator menekan Deteksi dan memberi izin kamera serta mikrofon.
 3. Sistem menampilkan kamera yang ditemukan, kemampuan maksimum, zoom, dan
    torch bila dilaporkan browser.
-4. Sistem menguji kombinasi resolusi/FPS output dengan constraint `exact` pada
+4. Sistem menguji kombinasi resolusi/FPS output dengan constraint `ideal` pada
    kamera yang dipilih, termasuk aspect ratio target dan `crop-and-scale`.
-5. Hanya kombinasi yang benar-benar berhasil dibuka yang ditampilkan.
+5. Kombinasi ditampilkan bila track live dan rasio aktual mendekati target;
+   ukuran/FPS aktual dapat mengikuti keputusan browser.
 6. Operator memilih codec WebRTC yang tersedia, audio Opus, max bitrate, dan
    optional recording.
 7. `Create stream` membuat job/path/token saja; kamera belum dimulai.
@@ -55,11 +56,11 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 1. Halaman live menampilkan preview standby.
 2. Operator menekan `Start`.
-3. Browser membuka kamera/mikrofon lagi dengan profile output exact yang
+3. Browser membuka kamera/mikrofon lagi dengan profile output ideal yang
    tersimpan.
-4. `getSettings()` diverifikasi agar ukuran/FPS aktual cocok. Kamera 4:3 boleh
-   dipotong dan diperkecil oleh pipeline `crop-and-scale`; tidak ada canvas,
-   rotate, atau fallback ukuran diam-diam.
+4. Track harus aktif dan rasio `getSettings()` harus mendekati target. Kamera
+   4:3 boleh dipotong dan diperkecil oleh pipeline `crop-and-scale`; tidak ada
+   canvas, rotate, atau fallback ukuran diam-diam.
 5. Browser membuat peer connection dan mengirim SDP WHIP ke MediaMTX.
 6. Setelah WebRTC connected, MediaMTX path menjadi live.
 7. `Stop` menghentikan track dan sesi WHIP, tetapi job tetap tersedia di Home.
@@ -82,13 +83,15 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 ### Video
 
-- Resolusi dan FPS adalah dimensi final encoded track, bukan ukuran sensor.
+- Resolusi dan FPS adalah target encoded track, bukan ukuran sensor; browser
+  dapat mengembalikan ukuran/FPS aktual yang sedikit berbeda.
 - Probe hanya menawarkan target 1920×1080, 1280×720, dan 854×480 pada FPS
   24/30/60 (serta FPS maksimum/default yang dilaporkan), atau pasangan portrait
   9:16 ketika orientasi portrait dipilih.
-- Setiap target diuji dengan `width`, `height`, `aspectRatio`, `frameRate`, dan
-  `resizeMode: crop-and-scale` yang `exact`. Hanya target yang benar-benar
-  menghasilkan ukuran/FPS tersebut pada `getSettings()` yang ditampilkan.
+- Setiap target diuji dengan `width`, `height`, dan `aspectRatio` `ideal`, serta
+  `frameRate` `ideal` dengan batas `max` dan `resizeMode: crop-and-scale`
+  `ideal`. Target diterima bila track live dan rasio `getSettings()` mendekati
+  target; ukuran/FPS aktual tidak dibandingkan dengan equality kaku.
 - Kemampuan sensor native, misalnya 2304×1728, hanya ditampilkan sebagai
   informasi kamera. Kamera 4:3 dapat dipotong ke 1920×1080 jika browser
   menyetujui pipeline crop-and-scale; ukuran 4:3 tidak menjadi output job.
@@ -106,15 +109,15 @@ Referensi: [MediaMTX WebRTC clients](https://mediamtx.org/docs/publish/webrtc-cl
 
 ### Codec
 
-- Capability probe memakai `RTCRtpSender.getCapabilities("video")`.
-- Hasil probe berarti codec tersedia pada browser/WebRTC, bukan bukti bahwa
-  browser pasti memakai hardware encoder.
-- Browser tidak memiliki API standar untuk membuktikan hardware-only.
-- Bila hardware encoder wajib dijamin, produk harus memakai aplikasi native
-  Android Camera2/MediaCodec.
-- V1 SRT memilih H.264 atau H.265. VP8/VP9/AV1 dapat ditampilkan sebagai
-  capability browser tetapi tidak dipakai untuk output SRT v1.
-- H.265 bergantung pada browser, OS, dan GPU yang kompatibel.
+- Capability probe menggabungkan `RTCRtpSender.getCapabilities("video")` dan
+  `navigator.mediaCapabilities.encodingInfo()`.
+- H.264/H.265 hanya dapat dipilih bila capability RTP cocok dan hasil
+  `encodingInfo()` adalah `supported: true` serta `powerEfficient: true`.
+- Publisher mengunci codec terpilih dengan `setCodecPreferences`, sehingga
+  VP8/VP9/AV1 tidak menjadi fallback software.
+- `powerEfficient` adalah sinyal browser, bukan jaminan absolut hardware-only;
+  jaminan hardware tetap memerlukan aplikasi native Android Camera2/MediaCodec.
+- V1 SRT memilih H.264 atau H.265. H.265 bergantung pada browser, OS, dan GPU.
 
 ### Audio
 
@@ -224,8 +227,8 @@ dan UDP 8890 untuk SRT tetap direct.
 
 - `go test ./...` lulus.
 - `npm run check`, `npm run build`, dan `npm run test:flow` lulus.
-- Browser hanya menampilkan target output yang lolos exact preflight dengan
-  ukuran/aspect ratio final yang benar.
+- Browser hanya menampilkan target output yang lolos preflight ideal dengan
+  track aktif dan aspect ratio yang mendekati target.
 - Start gagal jelas bila kamera, audio, codec, atau WHIP tidak tersedia.
 - Create tidak meminta kamera live; Start yang membuka kamera.
 - Stop lalu buka ulang dari dashboard memakai URL SRT yang sama.
