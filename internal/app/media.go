@@ -239,6 +239,7 @@ webrtcServerCert: %s
 webrtcServerKey: %s
 webrtcAllowOrigins: ["*"]
 webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
 webrtcIPsFromInterfaces: true
 webrtcAdditionalHosts: %s
 

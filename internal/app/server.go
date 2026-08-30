@@ -171,7 +171,7 @@ func (a *App) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !sameOrigin(r) {
+	if !sameOrigin(r, a.cfg.PublicOrigin) {
 		writeError(w, http.StatusForbidden, "request origin is not allowed", "origin_denied")
 		return
 	}
@@ -273,7 +273,7 @@ func (a *App) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if !sameOrigin(r) {
+	if !sameOrigin(r, a.cfg.PublicOrigin) {
 		writeError(w, http.StatusForbidden, "request origin is not allowed", "origin_denied")
 		return
 	}
@@ -443,7 +443,7 @@ func (a *App) handleStreamRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleUpdateStream(w http.ResponseWriter, r *http.Request, id string) {
-	if !sameOrigin(r) {
+	if !sameOrigin(r, a.cfg.PublicOrigin) {
 		writeError(w, http.StatusForbidden, "request origin is not allowed", "origin_denied")
 		return
 	}
@@ -501,7 +501,7 @@ func (a *App) handleUpdateStream(w http.ResponseWriter, r *http.Request, id stri
 }
 
 func (a *App) handleStopStream(w http.ResponseWriter, r *http.Request, id string) {
-	if !sameOrigin(r) {
+	if !sameOrigin(r, a.cfg.PublicOrigin) {
 		writeError(w, http.StatusForbidden, "request origin is not allowed", "origin_denied")
 		return
 	}
@@ -537,7 +537,7 @@ func (a *App) handleStopStream(w http.ResponseWriter, r *http.Request, id string
 }
 
 func (a *App) handleDeleteStream(w http.ResponseWriter, r *http.Request, id string) {
-	if !sameOrigin(r) {
+	if !sameOrigin(r, a.cfg.PublicOrigin) {
 		writeError(w, http.StatusForbidden, "request origin is not allowed", "origin_denied")
 		return
 	}
@@ -664,7 +664,7 @@ func (a *App) handleRecordingRoute(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(name, `"`, "")+`"`)
 		http.ServeFile(w, r, file)
 	case action == "delete" && r.Method == http.MethodDelete:
-		if !sameOrigin(r) {
+		if !sameOrigin(r, a.cfg.PublicOrigin) {
 			writeError(w, http.StatusForbidden, "request origin is not allowed", "origin_denied")
 			return
 		}
@@ -759,16 +759,25 @@ func (a *App) requireUser(w http.ResponseWriter, r *http.Request) (authenticated
 	return user, ok
 }
 
-func sameOrigin(r *http.Request) bool {
+func sameOrigin(r *http.Request, configuredOrigins ...string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
 	}
 	parsed, err := url.Parse(origin)
-	if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, r.Host) {
+	if err != nil || parsed.Host == "" {
 		return false
 	}
-	return strings.EqualFold(parsed.Scheme, requestScheme(r))
+	if strings.EqualFold(parsed.Host, r.Host) && strings.EqualFold(parsed.Scheme, requestScheme(r)) {
+		return true
+	}
+	for _, configuredOrigin := range configuredOrigins {
+		configured, err := url.Parse(strings.TrimRight(configuredOrigin, "/"))
+		if err == nil && configured.Host != "" && strings.EqualFold(parsed.Scheme, configured.Scheme) && strings.EqualFold(parsed.Host, configured.Host) {
+			return true
+		}
+	}
+	return false
 }
 
 func requestScheme(r *http.Request) string {

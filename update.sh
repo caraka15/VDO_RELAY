@@ -177,8 +177,9 @@ ensure_firewall_ports() {
     return 0
   fi
   sudo ufw allow 8189/udp >/dev/null
+  sudo ufw allow 8189/tcp >/dev/null
   sudo ufw allow 8890/udp >/dev/null
-  log 'UFW aktif: port 8189/udp dan 8890/udp diizinkan'
+  log 'UFW aktif: port 8189 UDP/TCP dan 8890/udp diizinkan'
 }
 
 run_compose() {

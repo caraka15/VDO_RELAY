@@ -52,5 +52,5 @@ ENV VDO_DATA_DIR=/data \
   VDO_PUBLIC_ADDR=:8443 \
   VDO_INTERNAL_ADDR=127.0.0.1:8080
 
-EXPOSE 8443/tcp 8889/tcp 8189/udp 8890/udp
+EXPOSE 8443/tcp 8889/tcp 8189/udp 8189/tcp 8890/udp
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

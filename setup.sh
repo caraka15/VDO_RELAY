@@ -563,9 +563,9 @@ SRT output:    srt://$MEDIA_DOMAIN:8890
 Login awal:    admin / admin (wajib ganti password)
 
 Pastikan firewall/security group membuka:
-  80/tcp  443/tcp  8189/udp  8890/udp
+  80/tcp  443/tcp  8189/udp  8189/tcp  8890/udp
 
-Nginx menangani web dan WHIP/WHEP. ICE WebRTC UDP 8189 dan SRT 8890 tetap
+Nginx menangani web dan WHIP/WHEP. ICE WebRTC UDP/TCP 8189 dan SRT 8890 tetap
 langsung menuju server.
 ${compose_user_note}
 EOF

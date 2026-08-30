@@ -206,6 +206,26 @@ export type CaptureSession = {
 export type Publisher = {
   close: () => void;
   setVideoBitrate?: (kbps: number) => Promise<void>;
+  getStats?: () => Promise<PublisherStats | null>;
+};
+
+export type PublisherStats = {
+  connectionState: string;
+  iceConnectionState: string;
+  videoBitrateKbps: number | null;
+  videoBytesSent: number | null;
+  videoPacketsSent: number | null;
+  videoPacketsLost: number | null;
+  framesEncoded: number | null;
+  frameWidth: number | null;
+  frameHeight: number | null;
+  qualityLimitationReason: string;
+  encoderImplementation: string;
+  availableOutgoingBitrateKbps: number | null;
+  currentRoundTripTimeMs: number | null;
+  localCandidateType: string;
+  remoteCandidateType: string;
+  protocol: string;
 };
 
 export type MediaDeviceRequest = "camera" | "microphone" | "camera-microphone";

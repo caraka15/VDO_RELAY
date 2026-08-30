@@ -12,8 +12,10 @@ services:
       - "127.0.0.1:8443:8443/tcp"
       # Nginx proxies the WHIP/WHEP HTTP handshake to this loopback port.
       - "127.0.0.1:8889:8889/tcp"
-      # ICE media is UDP and cannot be proxied by the HTTP Nginx vhost.
+      # ICE media cannot be proxied by the HTTP Nginx vhost.
       - "8189:8189/udp"
+      # TCP is the WebRTC fallback when UDP is unavailable.
+      - "8189:8189/tcp"
       - "8890:8890/udp"
     environment:
       VDO_PUBLIC_ORIGIN: ${VDO_PUBLIC_ORIGIN:?set VDO_PUBLIC_ORIGIN in .env}

@@ -82,7 +82,7 @@ func TestMediaOriginsAllowBrowserAliases(t *testing.T) {
 	if !strings.Contains(config, "moq: false") {
 		t.Fatal("MoQ must be explicitly disabled because MediaMTX enables it by default")
 	}
-	if !strings.Contains(config, "webrtcAddress: :8889") || !strings.Contains(config, "webrtcLocalUDPAddress: :8189") {
+	if !strings.Contains(config, "webrtcAddress: :8889") || !strings.Contains(config, "webrtcLocalUDPAddress: :8189") || !strings.Contains(config, "webrtcLocalTCPAddress: :8189") {
 		t.Fatal("WebRTC handshake and ICE listeners are not configured")
 	}
 	if !strings.Contains(config, "maxReaders: 10") {
@@ -323,6 +323,12 @@ func TestSameOriginBehindTLSProxy(t *testing.T) {
 	request.Header.Set("Origin", "http://app.example.com")
 	if sameOrigin(request) {
 		t.Fatal("HTTP origin should not match HTTPS application origin")
+	}
+
+	request.Host = "127.0.0.1:8081"
+	request.Header.Set("Origin", "https://app.example.com")
+	if !sameOrigin(request, "https://app.example.com") {
+		t.Fatal("configured public origin should be accepted behind an upstream proxy")
 	}
 }
 

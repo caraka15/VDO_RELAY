@@ -83,13 +83,14 @@ Git. SQLite dan recording berada di `./data`, jadi tidak hilang saat rebuild.
 | --- | --- | --- |
 | 80/tcp | ACME dan redirect Certbot | publik |
 | 443/tcp | web dashboard, API, player | publik |
-| 8189/udp | ICE WebRTC media | publik |
+| 8189/udp | ICE WebRTC media utama | publik |
+| 8189/tcp | ICE WebRTC fallback | publik |
 | 8890/udp | SRT output untuk OBS | publik |
 | 8443/tcp | Go app upstream | loopback host |
 | 8889/tcp | WHIP/WHEP MediaMTX upstream | loopback host |
 
-Nginx hanya menangani HTTP/HTTPS. UDP 8189 diperlukan WebRTC dan UDP 8890
-diperlukan OBS, sehingga keduanya tidak bisa digantikan oleh proxy HTTP Nginx.
+Nginx hanya menangani HTTP/HTTPS. UDP/TCP 8189 diperlukan WebRTC dan UDP 8890
+diperlukan OBS, sehingga ketiganya tidak bisa digantikan oleh proxy HTTP Nginx.
 Control API, metrics, playback, dan callback auth hanya bind loopback di
 container.
 

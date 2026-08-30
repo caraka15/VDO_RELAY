@@ -6,6 +6,8 @@
 
 class MediaMTXWebRTCPublisher {
   static #RETRY_PAUSE = 2000;
+  static #ICE_GATHER_TIMEOUT = 2000;
+  static #DEFAULT_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
 
   #conf;
   #state = "running";
@@ -15,6 +17,7 @@ class MediaMTXWebRTCPublisher {
   #sessionUrl = null;
   #queuedCandidates = [];
   #videoSender = null;
+  #lastVideoSample = null;
 
   constructor(conf) {
     this.#conf = conf;
@@ -47,6 +50,7 @@ class MediaMTXWebRTCPublisher {
     this.#videoSender = null;
     this.#offerData = null;
     this.#queuedCandidates = [];
+    this.#lastVideoSample = null;
   }
 
   #deleteSession() {
@@ -93,13 +97,44 @@ class MediaMTXWebRTCPublisher {
   }
 
   static #parseOffer(offer) {
-    const result = { iceUfrag: "", icePwd: "", medias: [] };
+    const result = { iceUfrag: "", icePwd: "", medias: [], candidates: new Set() };
+    let mediaIndex = -1;
     for (const line of offer.split("\r\n")) {
-      if (line.startsWith("m=")) result.medias.push(line.slice(2));
+      if (line.startsWith("m=")) {
+        mediaIndex += 1;
+        result.medias.push(line.slice(2));
+      }
       else if (!result.iceUfrag && line.startsWith("a=ice-ufrag:")) result.iceUfrag = line.slice(12);
       else if (!result.icePwd && line.startsWith("a=ice-pwd:")) result.icePwd = line.slice(10);
+      else if (line.startsWith("a=candidate:") && mediaIndex >= 0) result.candidates.add(`${mediaIndex}:${line.slice(2)}`);
     }
     return result;
+  }
+
+  static #candidateKey(candidate) {
+    return `${candidate.sdpMLineIndex ?? candidate.sdpMid ?? ""}:a=${candidate.candidate}`;
+  }
+
+  static #videoCodecsFor(codecCapabilities, codecName) {
+    const normalizedName = String(codecName).toLowerCase();
+    const primary = codecCapabilities.filter((codec) => String(codec.mimeType).toLowerCase() === normalizedName);
+    if (primary.length === 0) return [];
+
+    // setCodecPreferences() treats the supplied list as the complete list.
+    // Keep RTX/FEC beside the selected codec; removing them makes a single
+    // lost RTP packet turn into a visible block until the next keyframe.
+    const payloadTypes = new Set(primary
+      .map((codec) => Number(codec.preferredPayloadType ?? codec.payloadType))
+      .filter((payloadType) => Number.isInteger(payloadType)));
+    const recovery = codecCapabilities.filter((codec) => {
+      const mime = String(codec.mimeType || "").toLowerCase();
+      if (mime === "video/rtx") {
+        const apt = /(?:^|;)\s*apt\s*=\s*(\d+)/i.exec(String(codec.sdpFmtpLine || ""));
+        return apt ? payloadTypes.has(Number(apt[1])) : false;
+      }
+      return mime === "video/red" || mime === "video/ulpfec" || mime === "video/flexfec-03";
+    });
+    return [...primary, ...recovery];
   }
 
   static #generateSdpFragment(offerData, candidates) {
@@ -154,7 +189,10 @@ class MediaMTXWebRTCPublisher {
       headers: this.#authHeader(),
     });
     if (!response.ok) throw new Error(`WHIP OPTIONS gagal (${response.status})`);
-    return MediaMTXWebRTCPublisher.#linkToIceServers(response.headers.get("Link"));
+    const advertised = MediaMTXWebRTCPublisher.#linkToIceServers(response.headers.get("Link"));
+    // MediaMTX may have no ICE-server Link on a LAN deployment. VDO.Ninja
+    // still gives the browser a normal ICE configuration in that case.
+    return advertised.length > 0 ? advertised : MediaMTXWebRTCPublisher.#DEFAULT_ICE_SERVERS;
   }
 
   #codecMime(kind, codec) {
@@ -177,16 +215,43 @@ class MediaMTXWebRTCPublisher {
       });
       const codecName = this.#codecMime(track.kind, track.kind === "video" ? this.#conf.videoCodec : this.#conf.audioCodec);
       const capabilities = RTCRtpSender.getCapabilities?.(track.kind)?.codecs || [];
-      const matchedCodecs = capabilities.filter((codec) => String(codec.mimeType).toLowerCase() === codecName.toLowerCase());
+      const matchedCodecs = track.kind === "video"
+        ? MediaMTXWebRTCPublisher.#videoCodecsFor(capabilities, codecName)
+        : capabilities.filter((codec) => String(codec.mimeType).toLowerCase() === codecName.toLowerCase());
       if (matchedCodecs.length === 0) throw new Error(`WebRTC tidak menyediakan codec ${codecName}`);
       if (!transceiver.setCodecPreferences) throw new Error("Browser tidak mendukung pemilihan codec WebRTC");
       transceiver.setCodecPreferences(matchedCodecs);
       if (track.kind === "video") this.#videoSender = transceiver.sender;
     }
 
-    return this.#pc.createOffer().then((offer) => {
-      this.#offerData = MediaMTXWebRTCPublisher.#parseOffer(offer.sdp);
-      return this.#pc.setLocalDescription(offer).then(() => offer.sdp);
+    return this.#pc.createOffer().then(async (offer) => {
+      await this.#pc.setLocalDescription(offer);
+      await this.#waitForIceGathering();
+      const localDescription = this.#pc.localDescription;
+      if (!localDescription?.sdp) throw new Error("WebRTC tidak menghasilkan local SDP");
+      this.#offerData = MediaMTXWebRTCPublisher.#parseOffer(localDescription.sdp);
+      return localDescription.sdp;
+    });
+  }
+
+  async #waitForIceGathering() {
+    const pc = this.#pc;
+    if (pc === null || pc.iceGatheringState === "complete") return;
+    await new Promise((resolve) => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        window.clearTimeout(timer);
+        pc.removeEventListener("icegatheringstatechange", onStateChange);
+        resolve();
+      };
+      const onStateChange = () => {
+        if (pc.iceGatheringState === "complete") finish();
+      };
+      const timer = window.setTimeout(finish, MediaMTXWebRTCPublisher.#ICE_GATHER_TIMEOUT);
+      pc.addEventListener("icegatheringstatechange", onStateChange);
+      onStateChange();
     });
   }
 
@@ -220,9 +285,9 @@ class MediaMTXWebRTCPublisher {
     await this.#pc.setRemoteDescription({ type: "answer", sdp: answer });
     await this.#applyVideoParameters();
     if (this.#queuedCandidates.length > 0) {
-      const candidates = this.#queuedCandidates;
+      const candidates = this.#queuedCandidates.filter((candidate) => !this.#offerData?.candidates.has(MediaMTXWebRTCPublisher.#candidateKey(candidate)));
       this.#queuedCandidates = [];
-      await this.#sendLocalCandidates(candidates);
+      if (candidates.length > 0) await this.#sendLocalCandidates(candidates);
     }
   }
 
@@ -254,6 +319,49 @@ class MediaMTXWebRTCPublisher {
     parameters.encodings[0].maxBitrate = Math.round(this.#conf.videoBitrate * 1000);
     parameters.encodings[0].maxFramerate = this.#conf.videoFramerate;
     await this.#videoSender.setParameters(parameters);
+  }
+
+  async getStats() {
+    if (this.#pc === null || typeof this.#pc.getStats !== "function") return null;
+    const reports = await this.#pc.getStats();
+    let outbound = null;
+    let remoteInbound = null;
+    let transport = null;
+    let selectedPair = null;
+    for (const report of reports.values()) {
+      if (report.type === "outbound-rtp" && (report.kind === "video" || report.mediaType === "video") && !report.isRemote) outbound = report;
+      else if (report.type === "remote-inbound-rtp" && (report.kind === "video" || report.mediaType === "video") && (!outbound || report.localId === outbound.id)) remoteInbound = report;
+      else if (report.type === "transport" && report.selectedCandidatePairId) transport = report;
+      else if (report.type === "candidate-pair" && report.state === "succeeded" && (report.selected || report.nominated)) selectedPair = report;
+    }
+    if (transport?.selectedCandidatePairId) selectedPair = reports.get(transport.selectedCandidatePairId) || selectedPair;
+    const localCandidate = selectedPair?.localCandidateId ? reports.get(selectedPair.localCandidateId) : null;
+    const remoteCandidate = selectedPair?.remoteCandidateId ? reports.get(selectedPair.remoteCandidateId) : null;
+    const codec = outbound?.codecId ? reports.get(outbound.codecId) : null;
+    const now = performance.now();
+    let videoBitrateKbps = null;
+    if (outbound && this.#lastVideoSample && now > this.#lastVideoSample.at && outbound.bytesSent >= this.#lastVideoSample.bytes) {
+      videoBitrateKbps = ((outbound.bytesSent - this.#lastVideoSample.bytes) * 8) / (now - this.#lastVideoSample.at);
+    }
+    if (outbound) this.#lastVideoSample = { bytes: outbound.bytesSent, at: now };
+    return {
+      connectionState: this.#pc.connectionState,
+      iceConnectionState: this.#pc.iceConnectionState,
+      videoBitrateKbps,
+      videoBytesSent: outbound?.bytesSent ?? null,
+      videoPacketsSent: outbound?.packetsSent ?? null,
+      videoPacketsLost: remoteInbound?.packetsLost ?? null,
+      framesEncoded: outbound?.framesEncoded ?? null,
+      frameWidth: outbound?.frameWidth ?? null,
+      frameHeight: outbound?.frameHeight ?? null,
+      qualityLimitationReason: outbound?.qualityLimitationReason || "unknown",
+      encoderImplementation: codec?.encoderImplementation || codec?.implementation || "unknown",
+      availableOutgoingBitrateKbps: selectedPair?.availableOutgoingBitrate ? selectedPair.availableOutgoingBitrate / 1000 : null,
+      currentRoundTripTimeMs: selectedPair?.currentRoundTripTime ? selectedPair.currentRoundTripTime * 1000 : null,
+      localCandidateType: localCandidate?.candidateType || "unknown",
+      remoteCandidateType: remoteCandidate?.candidateType || "unknown",
+      protocol: localCandidate?.protocol || remoteCandidate?.protocol || "unknown",
+    };
   }
 
   #onConnectionState() {

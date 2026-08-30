@@ -34,6 +34,7 @@
     type CameraDevice,
     type CaptureSession,
     type Publisher,
+    type PublisherStats,
     type VideoCapability,
   } from "./lib/media";
   import DashboardView from "./components/DashboardView.svelte";
@@ -84,6 +85,7 @@
   let publisher: Publisher | null = null;
   let statsTimer: number | null = null;
   let liveStats: StreamStats | null = null;
+  let publisherStats: PublisherStats | null = null;
   let publisherStatus: PublisherStatus = "ready";
   let publisherError = "";
   let copied = false;
@@ -256,6 +258,7 @@
       publisherStatus = "ready";
       publisherError = "";
       liveStats = null;
+      publisherStats = null;
       page = "live";
       startStatsPolling();
     } catch (error) {
@@ -301,6 +304,7 @@
       publisherStatus = "ready";
       publisherError = "";
       verifiedProfile = null;
+      publisherStats = null;
       page = "live";
       startStatsPolling();
     } catch (error) {
@@ -396,8 +400,16 @@
 
   async function refreshLiveStats() {
     if (!liveStream) return;
+    const streamId = liveStream.id;
+    const activePublisher = publisher;
     try {
-      liveStats = await getStreamStats(liveStream.id);
+      const [serverStats, browserStats] = await Promise.all([
+        getStreamStats(streamId),
+        activePublisher?.getStats ? activePublisher.getStats().catch(() => null) : Promise.resolve(null),
+      ]);
+      if (liveStream?.id !== streamId) return;
+      liveStats = serverStats;
+      publisherStats = browserStats;
     } catch (error) {
       if (error instanceof APIError && error.status === 401) {
         await handleLogout();
@@ -417,6 +429,7 @@
     captureSession = null;
     if (liveStream) liveStream = { ...liveStream, status: "ready" };
     liveStats = null;
+    publisherStats = null;
     publisherStatus = "ready";
     publisherError = "";
     publishBusy = false;
@@ -530,7 +543,7 @@
 {:else if page === "result" && liveStream}
   <ResultView stream={liveStream} stats={liveStats} {publisherStatus} onBack={() => (page = "live")} onStop={stopRelay} />
 {:else if page === "live" && liveStream}
-  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} {cameraDevices} {microphoneDevices} deviceId={preparedInput?.deviceId || ""} audioDeviceId={preparedInput?.audioDeviceId || ""} stats={liveStats} {publisherStatus} {publisherError} {copied} starting={publishBusy} onStart={handlePublishStart} onSource={setSource} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onLeaveHome={leaveLive} />
+  <LiveView stream={liveStream} capture={captureSession} {verifiedProfile} {cameraDevices} {microphoneDevices} deviceId={preparedInput?.deviceId || ""} audioDeviceId={preparedInput?.audioDeviceId || ""} stats={liveStats} {publisherStats} {publisherStatus} {publisherError} {copied} starting={publishBusy} onStart={handlePublishStart} onSource={setSource} onCopy={handleCopy} onResult={openResult} onStopRelay={stopRelay} onLeaveHome={leaveLive} />
 {:else}
   <DashboardView session={session} {streams} {recordings} {recordingsLoading} {refreshing} error={dashboardError} onNewStream={openSetup} onDeviceCheck={openDeviceCheck} onOpenStream={handleOpenStream} onDeleteStream={handleDeleteStream} onRefresh={refreshDashboard} onLogout={handleLogout} onPassword={() => (page = "password")} onDeleteRecording={handleDeleteRecording} />
 {/if}
